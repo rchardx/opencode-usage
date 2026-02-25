@@ -40,6 +40,17 @@ def _fmt_cost(c: float) -> str:
     return f"${c:.2f}"
 
 
+_SPARK_CHARS = "▁▂▃▄▅▆▇█"
+
+
+def _spark_bar(value: int, max_value: int) -> str:
+    """Single-character bar proportional to value/max."""
+    if max_value <= 0 or value <= 0:
+        return "▁"
+    level = min(int(value / max_value * 7), 7)
+    return _SPARK_CHARS[level]
+
+
 def _short_model(name: str) -> str:
     """Abbreviate common model names to save table width."""
     import re
@@ -64,6 +75,7 @@ def _make_table(
     rows: list[UsageRow],
     show_breakdown: bool = True,
     show_detail: str | None = None,
+    trend_values: list[int] | None = None,
 ) -> Table:
     table = Table(
         title=title,
@@ -87,6 +99,11 @@ def _make_table(
         table.add_column("Cache W", justify="right", style="dim", min_width=6)
     table.add_column("Total", justify="right", style="bold white", min_width=7)
     table.add_column("Cost", justify="right", style="bold red", min_width=7)
+    if trend_values is not None:
+        table.add_column("Trend", justify="center", style="cyan", no_wrap=True)
+
+    # Precompute max for sparkline
+    trend_max = max(trend_values) if trend_values else 0
 
     # Track previous label for deduplication + group separators
     prev_label = None
@@ -112,6 +129,9 @@ def _make_table(
                 ]
             )
         cols.extend([_fmt_tokens(r.tokens.total), _fmt_cost(r.cost)])
+        if trend_values is not None:
+            tv = trend_values[_i] if _i < len(trend_values) else 0
+            cols.append(_spark_bar(tv, trend_max))
         table.add_row(*cols)
 
     return table
@@ -131,11 +151,13 @@ def render_summary(total: UsageRow, period: str) -> None:
 
 def render_daily(rows: list[UsageRow], period: str) -> None:
     """Render the daily breakdown table."""
+    trend = [r.tokens.total for r in rows]
     table = _make_table(
         title=f"Daily Usage ({period})",
         label_header="Date",
         rows=rows,
         show_breakdown=True,
+        trend_values=trend,
     )
     console.print(table)
 
