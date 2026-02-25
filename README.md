@@ -14,6 +14,16 @@ CLI tool to track and display [OpenCode](https://github.com/opencodeco/opencode)
 ## Installation
 
 ```bash
+# From PyPI
+pip install opencode-usage
+
+# Or with uv
+uv tool install opencode-usage
+```
+
+### From source
+
+```bash
 git clone https://github.com/rchardx/opencode-usage.git
 cd opencode-usage
 uv sync
