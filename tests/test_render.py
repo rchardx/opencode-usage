@@ -124,6 +124,7 @@ class TestSparkBar:
         # 200/100 clamped to full bar
         assert _spark_bar(200, 100) == "█" * 8
 
+
 # ── _fmt_delta ───────────────────────────────────────────────
 
 
