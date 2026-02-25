@@ -8,8 +8,9 @@ import re
 import sys
 from datetime import datetime, timedelta
 
+from . import render
 from .db import OpenCodeDB
-from .render import console, render_daily, render_grouped, render_summary
+from .render import configure_console, render_daily, render_grouped, render_summary
 
 
 def _parse_since(value: str) -> datetime:
@@ -86,6 +87,13 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Output as JSON",
     )
     p.add_argument(
+        "--no-color",
+        action="store_true",
+        dest="no_color",
+        help="Disable colored output",
+    )
+
+    p.add_argument(
         "--db",
         default=None,
         metavar="PATH",
@@ -123,10 +131,13 @@ def main(argv: list[str] | None = None) -> None:
     parser = _build_parser()
     args = parser.parse_args(argv)
 
+    if args.no_color:
+        configure_console(no_color=True)
+
     try:
         db = OpenCodeDB(db_path=args.db)
     except FileNotFoundError as e:
-        console.print(f"[red]Error:[/red] {e}")
+        render.console.print(f"[red]Error:[/red] {e}")
         sys.exit(1)
 
     since, period = _resolve_since(args)
@@ -164,7 +175,7 @@ def main(argv: list[str] | None = None) -> None:
     # Rich output
     total = db.totals(since=since)
     render_summary(total, period)
-    console.print()
+    render.console.print()
 
     if group_by == "day":
         render_daily(rows, period)

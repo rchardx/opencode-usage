@@ -15,6 +15,12 @@ if TYPE_CHECKING:
 console = Console()
 
 
+def configure_console(*, no_color: bool = False) -> None:
+    """Reconfigure the module-level console (e.g. for --no-color)."""
+    global console
+    console = Console(no_color=no_color)
+
+
 def _fmt_tokens(n: int) -> str:
     """Human-readable token count."""
     if n >= 1_000_000_000:
