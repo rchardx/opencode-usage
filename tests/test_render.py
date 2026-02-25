@@ -97,33 +97,32 @@ class TestShortModel:
 
 
 class TestSparkBar:
-    def test_zero_zero_returns_min(self):
-        assert _spark_bar(0, 0) == "▁"
+    def test_zero_zero_returns_empty(self):
+        assert _spark_bar(0, 0) == "░" * 8
 
     def test_max_equals_value_returns_full(self):
-        assert _spark_bar(100, 100) == "█"
+        assert _spark_bar(100, 100) == "█" * 8
 
-    def test_negative_value_returns_min(self):
-        assert _spark_bar(-5, 100) == "▁"
+    def test_negative_value_returns_empty(self):
+        assert _spark_bar(-5, 100) == "░" * 8
 
-    def test_negative_max_returns_min(self):
-        assert _spark_bar(50, -10) == "▁"
+    def test_negative_max_returns_empty(self):
+        assert _spark_bar(50, -10) == "░" * 8
 
     def test_zero_value_positive_max(self):
-        assert _spark_bar(0, 100) == "▁"
+        assert _spark_bar(0, 100) == "░" * 8
 
     def test_mid_value(self):
-        # 50/100 * 7 = 3.5 → int(3.5) = 3 → index 3 = "▄"
-        assert _spark_bar(50, 100) == "▄"
+        # 50/100 * 8 = 4.0 → round(4.0) = 4 filled
+        assert _spark_bar(50, 100) == "█" * 4 + "░" * 4
 
-    def test_small_fraction(self):
-        # 1/100 * 7 = 0.07 → int(0.07) = 0 → index 0 = "▁"
-        assert _spark_bar(1, 100) == "▁"
+    def test_small_fraction_at_least_one(self):
+        # 1/100 * 8 = 0.08 → round = 0, but max(1, 0) = 1 filled
+        assert _spark_bar(1, 100) == "█" + "░" * 7
 
     def test_value_exceeds_max_clamped(self):
-        # 200/100 * 7 = 14 → min(14, 7) = 7 → "█"
-        assert _spark_bar(200, 100) == "█"
-
+        # 200/100 clamped to full bar
+        assert _spark_bar(200, 100) == "█" * 8
 
 # ── _fmt_delta ───────────────────────────────────────────────
 
