@@ -89,8 +89,7 @@ opencode-usage --by model --json | jq '.rows[].label'
 
 Default database locations:
 
-- **macOS / Linux**: `~/.local/share/opencode/opencode.db`
-- **Windows**: `%LOCALAPPDATA%\opencode\opencode.db`
+- **All platforms** (macOS, Linux, Windows): `~/.local/share/opencode/opencode.db`
 
 ## Development
 

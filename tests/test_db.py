@@ -10,7 +10,7 @@ from typing import Any
 
 import pytest
 
-from opencode_usage.db import OpenCodeDB, UsageRow
+from opencode_usage.db import OpenCodeDB, UsageRow, _default_db_path
 
 
 def _make_msg(
@@ -414,3 +414,54 @@ class TestToDicts:
     def test_empty_list(self, db_path):
         db = OpenCodeDB(db_path=db_path)
         assert db.to_dicts([]) == []
+
+
+# ── _default_db_path ─────────────────────────────────────────
+
+
+class TestDefaultDbPath:
+    def test_default_path(self, monkeypatch):
+        """Test default path with no env vars set."""
+        monkeypatch.delenv("OPENCODE_DB", raising=False)
+        monkeypatch.delenv("XDG_DATA_HOME", raising=False)
+        result = _default_db_path()
+        assert result.name == "opencode.db"
+        assert result.parent.name == "opencode"
+        # Path separator-agnostic check
+        assert result.parts[-1] == "opencode.db"
+        assert result.parts[-2] == "opencode"
+
+    def test_opencode_db_override(self, monkeypatch):
+        """Test OPENCODE_DB env var overrides default."""
+        monkeypatch.setenv("OPENCODE_DB", "/custom/path.db")
+        monkeypatch.delenv("XDG_DATA_HOME", raising=False)
+        result = _default_db_path()
+        # Path separators may vary, so check equality using Path objects
+        assert Path(result) == Path("/custom/path.db")
+
+    def test_xdg_data_home_override(self, monkeypatch):
+        """Test XDG_DATA_HOME env var affects path."""
+        monkeypatch.delenv("OPENCODE_DB", raising=False)
+        monkeypatch.setenv("XDG_DATA_HOME", "/custom/xdg")
+        result = _default_db_path()
+        # Check that it uses XDG_DATA_HOME as base
+        assert result.name == "opencode.db"
+        assert result.parent.name == "opencode"
+        assert "/custom/xdg" in str(result) or "\\custom\\xdg" in str(result)
+
+    def test_opencode_db_takes_priority(self, monkeypatch):
+        """Test OPENCODE_DB takes priority over XDG_DATA_HOME."""
+        monkeypatch.setenv("OPENCODE_DB", "/custom/override.db")
+        monkeypatch.setenv("XDG_DATA_HOME", "/custom/xdg")
+        result = _default_db_path()
+        # OPENCODE_DB should take priority
+        assert Path(result) == Path("/custom/override.db")
+
+    def test_path_suffix_consistency(self, monkeypatch):
+        """Test that default paths always end with opencode/opencode.db."""
+        monkeypatch.delenv("OPENCODE_DB", raising=False)
+        monkeypatch.delenv("XDG_DATA_HOME", raising=False)
+        result = _default_db_path()
+        assert result.name == "opencode.db"
+        assert result.parent.name == "opencode"
+        assert result.is_absolute()  # Should be absolute path

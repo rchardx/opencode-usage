@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-import platform
 import sqlite3
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -15,17 +14,7 @@ def _default_db_path() -> Path:
     """Resolve the OpenCode database path per platform."""
     if custom := os.environ.get("OPENCODE_DB"):
         return Path(custom)
-
-    system = platform.system()
-    if system == "Darwin":
-        base = Path.home() / ".local" / "share"
-    elif system == "Linux":
-        base = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share"))
-    elif system == "Windows":
-        base = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local"))
-    else:
-        base = Path.home() / ".local" / "share"
-
+    base = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share"))
     return base / "opencode" / "opencode.db"
 
 
