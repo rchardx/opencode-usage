@@ -28,4 +28,4 @@ jobs:
       - uses: astral-sh/setup-uv@v6
       - run: uv python install ${{ matrix.python-version }}
       - run: uv sync
-      - run: uv run opencode-usage --help
+      - run: uv run pytest tests/

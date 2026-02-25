@@ -9,6 +9,9 @@ dependencies = [
     "rich>=13.0",
 ]
 
+[dependency-groups]
+dev = ["pytest>=7.0"]
+
 [project.scripts]
 opencode-usage = "opencode_usage.cli:main"
 
@@ -40,3 +43,6 @@ select = [
 
 [tool.ruff.lint.isort]
 known-first-party = ["opencode_usage"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
