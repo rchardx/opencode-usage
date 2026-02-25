@@ -1,6 +1,6 @@
 [project]
 name = "opencode-usage"
-version = "0.1.2"
+version = "0.2.0"
 description = "CLI tool to track and display OpenCode token usage statistics"
 readme = "README.md"
 requires-python = ">=3.10"
