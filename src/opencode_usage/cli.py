@@ -7,9 +7,10 @@ import json
 import re
 import sys
 from datetime import datetime, timedelta
+from typing import Any
 
 from . import render
-from .db import OpenCodeDB
+from .db import OpenCodeDB, UsageRow
 from .render import configure_console, render_daily, render_grouped, render_summary
 
 
@@ -87,12 +88,16 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Output as JSON",
     )
     p.add_argument(
+        "--compare",
+        action="store_true",
+        help="Compare with previous period of same length",
+    )
+    p.add_argument(
         "--no-color",
         action="store_true",
         dest="no_color",
         help="Disable colored output",
     )
-
     p.add_argument(
         "--db",
         default=None,
@@ -127,6 +132,49 @@ def _resolve_since(args: argparse.Namespace) -> tuple[datetime | None, str]:
     return since, "Last 7 days"
 
 
+def _fetch_rows(
+    db: OpenCodeDB,
+    group_by: str,
+    *,
+    since: datetime | None = None,
+    until: datetime | None = None,
+    limit: int | None = None,
+) -> list[UsageRow]:
+    """Fetch rows based on group_by dimension."""
+    if group_by == "day":
+        return db.daily(since=since, until=until, limit=limit)
+    if group_by == "model":
+        return db.by_model(since=since, until=until, limit=limit)
+    if group_by == "agent":
+        return db.by_agent(since=since, until=until, limit=limit)
+    if group_by == "provider":
+        return db.by_provider(since=since, until=until, limit=limit)
+    if group_by == "session":
+        return db.by_session(since=since, until=until, limit=limit)
+    return []
+
+
+def _compute_deltas(
+    current: list[UsageRow],
+    previous: list[UsageRow],
+) -> list[float | None]:
+    """Compute token delta percentages between current and previous rows."""
+    prev_map: dict[str, int] = {}
+    for r in previous:
+        key = f"{r.label}:{r.detail}" if r.detail else r.label
+        prev_map[key] = prev_map.get(key, 0) + r.tokens.total
+
+    deltas: list[float | None] = []
+    for r in current:
+        key = f"{r.label}:{r.detail}" if r.detail else r.label
+        prev_val = prev_map.get(key)
+        if prev_val and prev_val > 0:
+            deltas.append((r.tokens.total - prev_val) / prev_val * 100)
+        else:
+            deltas.append(None)
+    return deltas
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = _build_parser()
     args = parser.parse_args(argv)
@@ -141,43 +189,48 @@ def main(argv: list[str] | None = None) -> None:
         sys.exit(1)
 
     since, period = _resolve_since(args)
-    group_by = args.by
+    group_by = args.by or "day"
 
-    # Default view: summary + daily breakdown
-    if group_by is None:
-        group_by = "day"
+    # Compute previous period for --compare
+    now = datetime.now().astimezone()
+    prev_since = None
+    if args.compare and since is not None:
+        period_length = now - since
+        prev_since = since - period_length
 
-    # Fetch data
-    if group_by == "day":
-        rows = db.daily(since=since, limit=args.limit)
-    elif group_by == "model":
-        rows = db.by_model(since=since, limit=args.limit)
-    elif group_by == "agent":
-        rows = db.by_agent(since=since, limit=args.limit)
-    elif group_by == "provider":
-        rows = db.by_provider(since=since, limit=args.limit)
-    elif group_by == "session":
-        rows = db.by_session(since=since, limit=args.limit)
-    else:
-        rows = []
+    # Fetch current data
+    rows = _fetch_rows(db, group_by, since=since, limit=args.limit)
+    total = db.totals(since=since)
+
+    # Fetch previous period data for --compare
+    prev_total = None
+    prev_rows: list[UsageRow] = []
+    if prev_since is not None:
+        prev_total = db.totals(since=prev_since, until=since)
+        if group_by != "day":
+            prev_rows = _fetch_rows(db, group_by, since=prev_since, until=since, limit=args.limit)
 
     # JSON output
     if args.json_output:
-        total = db.totals(since=since)
-        output = {
+        output: dict[str, Any] = {
             "period": period,
             "total": db.to_dicts([total])[0],
             "rows": db.to_dicts(rows),
         }
+        if prev_total is not None:
+            output["previous_total"] = db.to_dicts([prev_total])[0]
+        if prev_rows:
+            output["previous_rows"] = db.to_dicts(prev_rows)
         print(json.dumps(output, indent=2, ensure_ascii=False))
         return
 
     # Rich output
-    total = db.totals(since=since)
-    render_summary(total, period)
+    render_summary(total, period, prev_total=prev_total)
     render.console.print()
+
+    deltas = _compute_deltas(rows, prev_rows) if prev_rows else None
 
     if group_by == "day":
         render_daily(rows, period)
     else:
-        render_grouped(rows, group_by, period)
+        render_grouped(rows, group_by, period, deltas=deltas)

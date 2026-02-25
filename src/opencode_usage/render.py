@@ -51,6 +51,15 @@ def _spark_bar(value: int, max_value: int) -> str:
     return _SPARK_CHARS[level]
 
 
+def _fmt_delta(pct: float) -> str:
+    """Format a percentage delta with color and arrow."""
+    if pct > 0:
+        return f"[red]↑{pct:.0f}%[/]"
+    if pct < 0:
+        return f"[green]↓{abs(pct):.0f}%[/]"
+    return "[dim]→0%[/]"
+
+
 def _short_model(name: str) -> str:
     """Abbreviate common model names to save table width."""
     import re
@@ -76,6 +85,7 @@ def _make_table(
     show_breakdown: bool = True,
     show_detail: str | None = None,
     trend_values: list[int] | None = None,
+    deltas: list[float | None] | None = None,
 ) -> Table:
     table = Table(
         title=title,
@@ -101,6 +111,8 @@ def _make_table(
     table.add_column("Cost", justify="right", style="bold red", min_width=7)
     if trend_values is not None:
         table.add_column("Trend", justify="center", style="cyan", no_wrap=True)
+    if deltas is not None:
+        table.add_column("Δ", justify="right", min_width=6)
 
     # Precompute max for sparkline
     trend_max = max(trend_values) if trend_values else 0
@@ -132,20 +144,36 @@ def _make_table(
         if trend_values is not None:
             tv = trend_values[_i] if _i < len(trend_values) else 0
             cols.append(_spark_bar(tv, trend_max))
+        if deltas is not None:
+            d = deltas[_i] if _i < len(deltas) else None
+            cols.append(_fmt_delta(d) if d is not None else "[dim]-[/]")
         table.add_row(*cols)
 
     return table
 
 
-def render_summary(total: UsageRow, period: str) -> None:
+def render_summary(
+    total: UsageRow,
+    period: str,
+    prev_total: UsageRow | None = None,
+) -> None:
     """Print a one-line summary panel."""
     text = Text()
     text.append("  Calls: ", style="dim")
     text.append(f"{total.calls:,}", style="bold magenta")
+    if prev_total is not None and prev_total.calls > 0:
+        pct = (total.calls - prev_total.calls) / prev_total.calls * 100
+        text.append(Text.from_markup(f" {_fmt_delta(pct)}"))
     text.append("  │  Tokens: ", style="dim")
     text.append(_fmt_tokens(total.tokens.total), style="bold white")
+    if prev_total is not None and prev_total.tokens.total > 0:
+        pct = (total.tokens.total - prev_total.tokens.total) / prev_total.tokens.total * 100
+        text.append(Text.from_markup(f" {_fmt_delta(pct)}"))
     text.append("  │  Cost: ", style="dim")
     text.append(_fmt_cost(total.cost), style="bold red")
+    if prev_total is not None and prev_total.cost > 0:
+        pct = (total.cost - prev_total.cost) / prev_total.cost * 100
+        text.append(Text.from_markup(f" {_fmt_delta(pct)}"))
     console.print(Panel(text, title=f"[bold]OpenCode Usage — {period}[/bold]", border_style="blue"))
 
 
@@ -166,6 +194,7 @@ def render_grouped(
     rows: list[UsageRow],
     group_by: str,
     period: str,
+    deltas: list[float | None] | None = None,
 ) -> None:
     """Render a grouped breakdown table."""
     label_map = {
@@ -188,5 +217,6 @@ def render_grouped(
         rows=rows,
         show_breakdown=show_breakdown,
         show_detail=show_detail,
+        deltas=deltas,
     )
     console.print(table)

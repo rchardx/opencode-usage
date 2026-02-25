@@ -67,21 +67,35 @@ class OpenCodeDB:
 
     # ── query helpers ─────────────────────────────────────────────
 
-    def _time_filter(self, since: datetime | None) -> tuple[str, list[Any]]:
-        """Return a WHERE clause fragment and params for time filtering."""
-        if since is None:
-            return "", []
-        ts_ms = int(since.timestamp() * 1000)
-        return "AND json_extract(data, '$.time.created') >= ?", [ts_ms]
+    def _time_filter(
+        self,
+        since: datetime | None,
+        until: datetime | None = None,
+        *,
+        col: str = "data",
+    ) -> tuple[str, list[Any]]:
+        """Return WHERE clause fragments and params for time filtering."""
+        clauses: list[str] = []
+        params: list[Any] = []
+        if since is not None:
+            ts_ms = int(since.timestamp() * 1000)
+            clauses.append(f"AND json_extract({col}, '$.time.created') >= ?")
+            params.append(ts_ms)
+        if until is not None:
+            ts_ms = int(until.timestamp() * 1000)
+            clauses.append(f"AND json_extract({col}, '$.time.created') < ?")
+            params.append(ts_ms)
+        return " ".join(clauses), params
 
     def _base_query(
         self,
         group_expr: str,
         since: datetime | None = None,
+        until: datetime | None = None,
         order: str = "total_tokens DESC",
         limit: int | None = None,
     ) -> list[UsageRow]:
-        time_clause, params = self._time_filter(since)
+        time_clause, params = self._time_filter(since, until)
 
         sql = f"""
             SELECT
@@ -129,26 +143,43 @@ class OpenCodeDB:
 
     # ── public API ────────────────────────────────────────────────
 
-    def daily(self, since: datetime | None = None, limit: int | None = None) -> list[UsageRow]:
+    def daily(
+        self,
+        since: datetime | None = None,
+        until: datetime | None = None,
+        limit: int | None = None,
+    ) -> list[UsageRow]:
         return self._base_query(
             group_expr=(
                 "date(json_extract(data, '$.time.created') / 1000, 'unixepoch', 'localtime')"
             ),
             since=since,
+            until=until,
             order="label DESC",
             limit=limit,
         )
 
-    def by_model(self, since: datetime | None = None, limit: int | None = None) -> list[UsageRow]:
+    def by_model(
+        self,
+        since: datetime | None = None,
+        until: datetime | None = None,
+        limit: int | None = None,
+    ) -> list[UsageRow]:
         return self._base_query(
             group_expr="json_extract(data, '$.modelID')",
             since=since,
+            until=until,
             limit=limit,
         )
 
-    def by_agent(self, since: datetime | None = None, limit: int | None = None) -> list[UsageRow]:
+    def by_agent(
+        self,
+        since: datetime | None = None,
+        until: datetime | None = None,
+        limit: int | None = None,
+    ) -> list[UsageRow]:
         """Group by agent x model, showing which model each agent uses."""
-        time_clause, params = self._time_filter(since)
+        time_clause, params = self._time_filter(since, until)
 
         sql = f"""
             SELECT
@@ -197,17 +228,26 @@ class OpenCodeDB:
         ]
 
     def by_provider(
-        self, since: datetime | None = None, limit: int | None = None
+        self,
+        since: datetime | None = None,
+        until: datetime | None = None,
+        limit: int | None = None,
     ) -> list[UsageRow]:
         return self._base_query(
             group_expr="json_extract(data, '$.providerID')",
             since=since,
+            until=until,
             limit=limit,
         )
 
-    def by_session(self, since: datetime | None = None, limit: int | None = None) -> list[UsageRow]:
+    def by_session(
+        self,
+        since: datetime | None = None,
+        until: datetime | None = None,
+        limit: int | None = None,
+    ) -> list[UsageRow]:
         """Group by session, using session title as label."""
-        _time_clause, params = self._time_filter(since)
+        time_clause, params = self._time_filter(since, until, col="m.data")
 
         sql = f"""
             SELECT
@@ -224,7 +264,7 @@ class OpenCodeDB:
             LEFT JOIN session s ON m.session_id = s.id
             WHERE json_extract(m.data, '$.role') = 'assistant'
               AND json_extract(m.data, '$.tokens.total') IS NOT NULL
-              {"AND json_extract(m.data, '$.time.created') >= ?" if params else ""}
+              {time_clause}
             GROUP BY m.session_id
             ORDER BY total_tokens DESC
         """
@@ -254,11 +294,16 @@ class OpenCodeDB:
             for r in rows
         ]
 
-    def totals(self, since: datetime | None = None) -> UsageRow:
+    def totals(
+        self,
+        since: datetime | None = None,
+        until: datetime | None = None,
+    ) -> UsageRow:
         """Return a single aggregated row for the period."""
         rows = self._base_query(
             group_expr="'total'",
             since=since,
+            until=until,
         )
         if rows:
             return rows[0]
