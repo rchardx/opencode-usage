@@ -63,3 +63,179 @@ class TestFacetCache:
         cache_dir = tmp_path / "opencode-usage" / "cache"
         tmp_files = list(cache_dir.glob("*.tmp"))
         assert len(tmp_files) == 0
+
+
+# ── TestQuantInsightsEngine ───────────────────────────────────────────────────
+
+
+class TestQuantInsightsEngine:
+    def test_build_quantitative(self, tmp_path, monkeypatch):
+        """compute_quantitative returns populated QuantInsights from real DB."""
+        import sqlite3
+        from datetime import timezone
+
+        from opencode_usage.db import OpenCodeDB
+        from opencode_usage.insights import compute_quantitative
+
+        db_file = tmp_path / "opencode.db"
+        conn = sqlite3.connect(str(db_file))
+        conn.execute("CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT, data TEXT)")
+        conn.execute(
+            "CREATE TABLE session "
+            "(id TEXT PRIMARY KEY, parent_id TEXT, title TEXT, "
+            "time_created INTEGER, time_updated INTEGER)"
+        )
+        conn.execute(
+            "CREATE TABLE part "
+            "(id TEXT PRIMARY KEY, message_id TEXT, session_id TEXT, "
+            "time_created INTEGER, data TEXT)"
+        )
+        import json
+
+        now_ms = int(__import__("datetime").datetime.now(tz=timezone.utc).timestamp() * 1000)
+        conn.execute(
+            "INSERT INTO session VALUES (?,?,?,?,?)",
+            ("s1", None, "Test Session", now_ms, now_ms),
+        )
+        conn.execute(
+            "INSERT INTO message VALUES (?,?,?)",
+            (
+                "m1",
+                "s1",
+                json.dumps(
+                    {
+                        "role": "assistant",
+                        "modelID": "test-model",
+                        "agent": "build",
+                        "providerID": "openrouter",
+                        "tokens": {
+                            "input": 100,
+                            "output": 50,
+                            "reasoning": 0,
+                            "cache": {"read": 20, "write": 5},
+                            "total": 175,
+                        },
+                        "cost": 0.01,
+                        "time": {"created": now_ms},
+                    }
+                ),
+            ),
+        )
+        conn.commit()
+        conn.close()
+
+        db = OpenCodeDB(db_path=db_file)
+        quant = compute_quantitative(db, None, None)
+        assert quant.avg_tokens_per_session > 0
+        assert isinstance(quant.cache_efficiency, dict)
+        assert isinstance(quant.cost_per_1k, dict)
+
+    def test_handles_empty_data(self, tmp_path):
+        """compute_quantitative handles empty DB gracefully."""
+        import sqlite3
+
+        from opencode_usage.db import OpenCodeDB
+        from opencode_usage.insights import compute_quantitative
+
+        db_file = tmp_path / "opencode.db"
+        conn = sqlite3.connect(str(db_file))
+        conn.execute("CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT, data TEXT)")
+        conn.execute(
+            "CREATE TABLE session "
+            "(id TEXT PRIMARY KEY, parent_id TEXT, title TEXT, "
+            "time_created INTEGER, time_updated INTEGER)"
+        )
+        conn.execute(
+            "CREATE TABLE part "
+            "(id TEXT PRIMARY KEY, message_id TEXT, session_id TEXT, "
+            "time_created INTEGER, data TEXT)"
+        )
+        conn.commit()
+        conn.close()
+
+        db = OpenCodeDB(db_path=db_file)
+        quant = compute_quantitative(db, None, None)
+        assert quant.avg_tokens_per_session == 0.0
+        assert quant.cache_efficiency == {}
+        assert quant.top_sessions == []
+
+
+# ── TestInsightsPipeline ──────────────────────────────────────────────────────
+
+
+class TestInsightsPipeline:
+    def _make_db(self, tmp_path):
+        """Create a minimal test DB for pipeline tests."""
+        import json
+        import sqlite3
+        from datetime import timezone
+
+        from opencode_usage.db import OpenCodeDB
+
+        db_file = tmp_path / "opencode.db"
+        conn = sqlite3.connect(str(db_file))
+        conn.execute("CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT, data TEXT)")
+        conn.execute(
+            "CREATE TABLE session "
+            "(id TEXT PRIMARY KEY, parent_id TEXT, title TEXT, "
+            "time_created INTEGER, time_updated INTEGER)"
+        )
+        conn.execute(
+            "CREATE TABLE part "
+            "(id TEXT PRIMARY KEY, message_id TEXT, session_id TEXT, "
+            "time_created INTEGER, data TEXT)"
+        )
+        now_ms = int(__import__("datetime").datetime.now(tz=timezone.utc).timestamp() * 1000)
+        conn.execute(
+            "INSERT INTO session VALUES (?,?,?,?,?)",
+            ("s1", None, "Test", now_ms, now_ms),
+        )
+        conn.execute(
+            "INSERT INTO message VALUES (?,?,?)",
+            (
+                "m1",
+                "s1",
+                json.dumps(
+                    {
+                        "role": "assistant",
+                        "modelID": "test-model",
+                        "agent": "build",
+                        "providerID": "openrouter",
+                        "tokens": {
+                            "input": 100,
+                            "output": 50,
+                            "reasoning": 0,
+                            "cache": {"read": 10, "write": 5},
+                            "total": 165,
+                        },
+                        "cost": 0.01,
+                        "time": {"created": now_ms},
+                    }
+                ),
+            ),
+        )
+        conn.commit()
+        conn.close()
+        return OpenCodeDB(db_path=db_file)
+
+    def test_run_no_llm(self, tmp_path, monkeypatch):
+        """run_insights with no_llm=True returns quantitative only."""
+        from opencode_usage.insights import run_insights
+
+        db = self._make_db(tmp_path)
+        result = run_insights(db, None, None, no_llm=True)
+        assert result.quantitative is not None
+        assert result.facets is None
+        assert result.suggestions is None
+
+    def test_run_no_llm_json_serializable(self, tmp_path, monkeypatch):
+        """run_insights result can be serialized to JSON."""
+        import json
+
+        from opencode_usage.insights import insights_to_dict, run_insights
+
+        db = self._make_db(tmp_path)
+        result = run_insights(db, None, None, no_llm=True)
+        d = insights_to_dict(result)
+        serialized = json.dumps(d)
+        assert "quantitative" in serialized

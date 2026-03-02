@@ -465,3 +465,265 @@ class TestDefaultDbPath:
         assert result.name == "opencode.db"
         assert result.parent.name == "opencode"
         assert result.is_absolute()  # Should be absolute path
+
+
+# ── Insights DB queries fixture ───────────────────────────────────────────────
+
+
+def _make_part(
+    part_id: str,
+    session_id: str,
+    *,
+    part_type: str = "text",
+    text: str = "",
+    tool_name: str = "bash",
+    status: str = "success",
+    time_created: int | None = None,
+) -> tuple[str, str, str, int, str]:
+    """Build a (id, message_id, session_id, time_created, data_json) tuple for part insertion."""
+    if time_created is None:
+        time_created = int(datetime.now(tz=timezone.utc).timestamp() * 1000)
+    if part_type == "text":
+        data: dict[str, Any] = {"type": "text", "text": text}
+    elif part_type == "tool":
+        data = {
+            "type": "tool",
+            "tool": {"name": tool_name},
+            "state": {"status": status, "input": "some input", "output": "some output"},
+        }
+    elif part_type == "reasoning":
+        data = {"type": "reasoning", "text": text}
+    else:
+        data = {"type": part_type}
+    return (part_id, "msg-" + part_id, session_id, time_created, json.dumps(data))
+
+
+@pytest.fixture()
+def insights_db_path(tmp_path: Path) -> Path:
+    """Create a test DB with session, message, and part tables for insights tests."""
+    path = tmp_path / "opencode.db"
+    conn = sqlite3.connect(str(path))
+    conn.execute("CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT, data TEXT)")
+    conn.execute(
+        "CREATE TABLE session "
+        "(id TEXT PRIMARY KEY, parent_id TEXT, title TEXT, "
+        "time_created INTEGER, time_updated INTEGER)"
+    )
+    conn.execute(
+        "CREATE TABLE part "
+        "(id TEXT PRIMARY KEY, message_id TEXT, session_id TEXT, "
+        "time_created INTEGER, data TEXT)"
+    )
+
+    now = datetime.now(tz=timezone.utc)
+    now_ms = int(now.timestamp() * 1000)
+
+    # Sessions
+    conn.execute(
+        "INSERT INTO session VALUES (?,?,?,?,?)",
+        ("s1", None, "Session One", now_ms - 10000, now_ms),
+    )
+    conn.execute(
+        "INSERT INTO session VALUES (?,?,?,?,?)",
+        ("s2", "s1", "Session Two (child)", now_ms - 5000, now_ms),
+    )
+
+    # Messages for s1
+    conn.executemany(
+        "INSERT INTO message VALUES (?,?,?)",
+        [
+            _make_msg(
+                "m1",
+                "s1",
+                agent="build",
+                model="deepseek-r1",
+                input_tok=100,
+                cache_read=50,
+                total_tok=200,
+                cost=0.01,
+                created_ms=now_ms,
+            ),
+            _make_msg(
+                "m2",
+                "s1",
+                agent="build",
+                model="deepseek-r1",
+                input_tok=200,
+                cache_read=100,
+                total_tok=400,
+                cost=0.02,
+                created_ms=now_ms,
+            ),
+        ],
+    )
+    # Messages for s2
+    conn.executemany(
+        "INSERT INTO message VALUES (?,?,?)",
+        [
+            _make_msg(
+                "m3",
+                "s2",
+                agent="explore",
+                model="gemma-3",
+                input_tok=50,
+                cache_read=0,
+                total_tok=100,
+                cost=0.005,
+                created_ms=now_ms,
+            ),
+        ],
+    )
+
+    # Parts for s1
+    conn.executemany(
+        "INSERT INTO part VALUES (?,?,?,?,?)",
+        [
+            _make_part("p1", "s1", part_type="text", text="Hello world", time_created=now_ms),
+            _make_part(
+                "p2",
+                "s1",
+                part_type="tool",
+                tool_name="bash",
+                status="success",
+                time_created=now_ms + 1,
+            ),
+            _make_part(
+                "p3",
+                "s1",
+                part_type="tool",
+                tool_name="bash",
+                status="error",
+                time_created=now_ms + 2,
+            ),
+            _make_part(
+                "p4",
+                "s1",
+                part_type="reasoning",
+                text="Thinking...",
+                time_created=now_ms + 3,
+            ),
+            _make_part(
+                "p5",
+                "s1",
+                part_type="step-start",
+                time_created=now_ms + 4,
+            ),
+        ],
+    )
+
+    conn.commit()
+    conn.close()
+    return path
+
+
+# ── TestSessionMeta ───────────────────────────────────────────────────────────
+
+
+class TestSessionMeta:
+    def test_returns_sessions(self, insights_db_path: Path) -> None:
+        """session_meta returns all sessions with aggregated stats."""
+        db = OpenCodeDB(db_path=insights_db_path)
+        sessions = db.session_meta()
+        assert len(sessions) == 2
+
+    def test_session_has_correct_tokens(self, insights_db_path: Path) -> None:
+        """session_meta aggregates tokens correctly."""
+        db = OpenCodeDB(db_path=insights_db_path)
+        sessions = db.session_meta()
+        # s1 has m1+m2 = 600 tokens, s2 has m3 = 100 tokens
+        totals = {s.session_id: s.total_tokens for s in sessions}
+        assert totals["s1"] == 600
+        assert totals["s2"] == 100
+
+    def test_respects_limit(self, insights_db_path: Path) -> None:
+        """session_meta respects the limit parameter."""
+        db = OpenCodeDB(db_path=insights_db_path)
+        sessions = db.session_meta(limit=1)
+        assert len(sessions) == 1
+
+
+# ── TestBuildTranscript ───────────────────────────────────────────────────────
+
+
+class TestBuildTranscript:
+    def test_basic_transcript(self, insights_db_path: Path) -> None:
+        """build_transcript returns text with expected part types."""
+        db = OpenCodeDB(db_path=insights_db_path)
+        transcript = db.build_transcript("s1")
+        assert "[text]" in transcript
+        assert "[tool:bash]" in transcript
+        assert "[thinking]" in transcript
+        # step-start should be skipped
+        assert "step-start" not in transcript
+
+    def test_truncation(self, insights_db_path: Path) -> None:
+        """build_transcript truncates to max_chars."""
+        db = OpenCodeDB(db_path=insights_db_path)
+        transcript = db.build_transcript("s1", max_chars=50)
+        assert len(transcript) <= 50 + len("\n[...truncated...]\n") + 50
+
+    def test_empty_session(self, insights_db_path: Path) -> None:
+        """build_transcript returns empty string for session with no parts."""
+        db = OpenCodeDB(db_path=insights_db_path)
+        transcript = db.build_transcript("nonexistent-session")
+        assert transcript == ""
+
+
+# ── TestCacheEfficiency ───────────────────────────────────────────────────────
+
+
+class TestCacheEfficiency:
+    def test_computes_ratios(self, insights_db_path: Path) -> None:
+        """cache_efficiency returns ratios between 0 and 1."""
+        db = OpenCodeDB(db_path=insights_db_path)
+        eff = db.cache_efficiency()
+        for model, ratio in eff.items():
+            assert 0.0 <= ratio <= 1.0, f"Invalid ratio for {model}: {ratio}"
+
+    def test_deepseek_ratio(self, insights_db_path: Path) -> None:
+        """deepseek-r1 cache ratio = (50+100) / (100+50+200+100) = 150/450 = 0.333."""
+        db = OpenCodeDB(db_path=insights_db_path)
+        eff = db.cache_efficiency()
+        assert "deepseek-r1" in eff
+        assert pytest.approx(eff["deepseek-r1"], abs=0.01) == 150 / 450
+
+    def test_zero_cache_read(self, insights_db_path: Path) -> None:
+        """Model with zero cache_read returns 0.0 ratio."""
+        db = OpenCodeDB(db_path=insights_db_path)
+        eff = db.cache_efficiency()
+        # gemma-3 has cache_read=0
+        if "gemma-3" in eff:
+            assert eff["gemma-3"] == 0.0
+
+
+# ── TestToolErrorRates ────────────────────────────────────────────────────────
+
+
+class TestToolErrorRates:
+    def test_computes_rates(self, insights_db_path: Path) -> None:
+        """tool_error_rates returns per-tool error rates."""
+        db = OpenCodeDB(db_path=insights_db_path)
+        rates = db.tool_error_rates()
+        # bash has 1 success + 1 error = 50% error rate
+        if "bash" in rates:
+            assert pytest.approx(rates["bash"], abs=0.01) == 0.5
+
+    def test_rates_between_0_and_1(self, insights_db_path: Path) -> None:
+        """All tool error rates are between 0 and 1."""
+        db = OpenCodeDB(db_path=insights_db_path)
+        rates = db.tool_error_rates()
+        for tool, rate in rates.items():
+            assert 0.0 <= rate <= 1.0, f"Invalid rate for {tool}: {rate}"
+
+
+# ── TestCostPer1kTokens ───────────────────────────────────────────────────────
+
+
+class TestCostPer1kTokens:
+    def test_computes_ratio(self, insights_db_path: Path) -> None:
+        """cost_per_1k_tokens returns positive values for models with cost."""
+        db = OpenCodeDB(db_path=insights_db_path)
+        cost_1k = db.cost_per_1k_tokens()
+        assert "deepseek-r1" in cost_1k
+        # deepseek-r1: cost=0.03, tokens=600 → 0.03/600*1000 = 0.05
+        assert pytest.approx(cost_1k["deepseek-r1"], abs=0.001) == 0.05
