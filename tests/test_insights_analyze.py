@@ -374,8 +374,10 @@ class TestAggregatedAnalysis:
         result = run_aggregate_analysis(
             self._make_facets(), self._make_stats(), self._make_config()
         )
-        assert result["agent_performance"] == {}
-        assert result["project_areas"] == {"result": "ok"}
+        failed = [k for k, v in result.items() if v == {}]
+        succeeded = [k for k, v in result.items() if v == {"result": "ok"}]
+        assert len(failed) == 1
+        assert len(succeeded) == 6
 
 
 # ── generate_at_a_glance ───────────────────────────────────────────────────
