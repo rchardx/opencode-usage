@@ -11,6 +11,7 @@ from rich.text import Text
 
 if TYPE_CHECKING:
     from .db import UsageRow
+    from .insights import InsightsResult
 
 console = Console()
 
@@ -244,3 +245,136 @@ def render_grouped(
         deltas=deltas,
     )
     console.print(table)
+
+
+def render_insights_progress(current: int, total: int) -> None:
+    """Print progress update for LLM analysis."""
+    console.print(f"[dim]Analyzing session {current}/{total}...[/dim]")
+
+
+def render_insights(result: InsightsResult, period: str) -> None:
+    """Render insights panels to the terminal."""
+    console.print(
+        Panel(
+            f"[bold]OpenCode Insights — {period}[/bold]",
+            border_style="blue",
+        )
+    )
+
+    # ── Efficiency Metrics ────────────────────────────────────────────────────
+    if result.quantitative.cache_efficiency:
+        eff_table = Table(
+            title="Efficiency Metrics",
+            show_header=True,
+            header_style="bold cyan",
+            border_style="dim",
+            title_style="bold white",
+            pad_edge=True,
+        )
+        eff_table.add_column("Model", style="bold", no_wrap=True)
+        eff_table.add_column("Cache Hit%", justify="right", style="green")
+        eff_table.add_column("Cost/1K Tokens", justify="right", style="yellow")
+        for model, ratio in result.quantitative.cache_efficiency.items():
+            cost_1k = result.quantitative.cost_per_1k.get(model, 0.0)
+            bar = _spark_bar(int(ratio * 100), 100)
+            cost_str = f"${cost_1k:.4f}" if cost_1k > 0 else "-"
+            eff_table.add_row(model, f"{ratio:.1%} {bar}", cost_str)
+        console.print(eff_table)
+
+    # ── Tool Reliability ──────────────────────────────────────────────────────
+    if result.quantitative.tool_error_rates:
+        tool_table = Table(
+            title="Tool Reliability",
+            show_header=True,
+            header_style="bold cyan",
+            border_style="dim",
+            title_style="bold white",
+            pad_edge=True,
+        )
+        tool_table.add_column("Tool", style="bold", no_wrap=True)
+        tool_table.add_column("Error%", justify="right")
+        for tool, rate in result.quantitative.tool_error_rates.items():
+            color = "red" if rate > 0.05 else "yellow" if rate > 0.02 else "green"
+            tool_table.add_row(tool, f"[{color}]{rate:.1%}[/{color}]")
+        console.print(tool_table)
+
+    # ── Agent Delegation ──────────────────────────────────────────────────────
+    if result.quantitative.agent_delegation:
+        console.print("\n[bold cyan]Agent Delegation[/bold cyan]")
+        for parent, children in result.quantitative.agent_delegation.items():
+            console.print(f"  [bold]{parent}[/bold] → {', '.join(children)}")
+
+    # ── Top Sessions ──────────────────────────────────────────────────────────
+    if result.quantitative.top_sessions:
+        sess_table = Table(
+            title="Top Sessions by Tokens",
+            show_header=True,
+            header_style="bold cyan",
+            border_style="dim",
+            title_style="bold white",
+            pad_edge=True,
+        )
+        sess_table.add_column("Title", style="bold", no_wrap=True, max_width=40)
+        sess_table.add_column("Tokens", justify="right", style="white")
+        sess_table.add_column("Cost", justify="right", style="bold red")
+        for s in result.quantitative.top_sessions:
+            label = (s.title or s.session_id)[:40]
+            sess_table.add_row(label, _fmt_tokens(s.total_tokens), _fmt_cost(s.total_cost))
+        console.print(sess_table)
+
+    # ── Qualitative panels (only if LLM data present) ─────────────────────────
+    if result.interaction_style:
+        console.print(
+            Panel(
+                result.interaction_style,
+                title="[bold cyan]Your Interaction Style[/bold cyan]",
+                border_style="dim",
+            )
+        )
+
+    if result.what_works:
+        lines = "\n".join(
+            f"  {i + 1}. [bold]{item.get('title', '')}[/bold]: {item.get('description', '')}"
+            for i, item in enumerate(result.what_works)
+        )
+        console.print(
+            Panel(lines, title="[bold cyan]What's Working[/bold cyan]", border_style="dim")
+        )
+
+    if result.friction:
+        lines = "\n".join(
+            f"  {i + 1}. [bold]{item.get('category', '')}[/bold]: {item.get('description', '')}"
+            + (
+                f"\n     [dim]Examples: {', '.join(item['examples'][:2])}[/dim]"
+                if item.get("examples")
+                else ""
+            )
+            for i, item in enumerate(result.friction)
+        )
+        console.print(
+            Panel(lines, title="[bold cyan]Friction Points[/bold cyan]", border_style="dim")
+        )
+
+    if result.suggestions:
+        categories = [
+            ("agents_md", "AGENTS.md Rules"),
+            ("skill", "Skills to Create"),
+            ("command", "Commands to Add"),
+            ("agent_config", "Agent Configuration"),
+        ]
+        suggestion_lines: list[str] = []
+        for cat_key, cat_label in categories:
+            cat_suggestions = [s for s in result.suggestions if s.category == cat_key]
+            if cat_suggestions:
+                suggestion_lines.append(f"[bold cyan]{cat_label}[/bold cyan]")
+                for s in cat_suggestions:
+                    suggestion_lines.append(f"  • [dim]{s.finding}[/dim]")
+                    suggestion_lines.append(f"    [green]→ {s.recommendation}[/green]")
+        if suggestion_lines:
+            console.print(
+                Panel(
+                    "\n".join(suggestion_lines),
+                    title="[bold cyan]Suggestions[/bold cyan]",
+                    border_style="green",
+                )
+            )

@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from .db import OpenCodeDB
 
+
 @dataclass
 class Credentials:
     """API credentials for insights service."""
@@ -258,9 +259,7 @@ def extract_facet(credentials: Credentials, transcript: str) -> Facet:
             underlying_goal=str(data.get("underlying_goal", "")),
             goal_categories={k: int(v) for k, v in data.get("goal_categories", {}).items()},
             outcome=str(data.get("outcome", "unclear_from_transcript")),
-            satisfaction_counts={
-                k: int(v) for k, v in data.get("satisfaction_counts", {}).items()
-            },
+            satisfaction_counts={k: int(v) for k, v in data.get("satisfaction_counts", {}).items()},
             friction_counts={k: int(v) for k, v in data.get("friction_counts", {}).items()},
             friction_detail=str(data.get("friction_detail", "")),
             session_type=str(data.get("session_type", "single_task")),
@@ -353,8 +352,8 @@ _SUGGESTIONS_SYSTEM_PROMPT = (
     "- interaction_style: str describing user's work style (e.g. 'systematic builder')\n"
     "- what_works: list of {title, description} for things going well\n"
     "- friction: list of {category, description, examples} for pain points\n"
-    "Example suggestion: {\"category\": \"agents_md\", \"finding\": \"User repeatedly asks "
-    "for compact output\", \"recommendation\": \"Add rule: prefer concise responses\"}\n"
+    'Example suggestion: {"category": "agents_md", "finding": "User repeatedly asks '
+    'for compact output", "recommendation": "Add rule: prefer concise responses"}\n'
     "Return ONLY valid JSON, no markdown fences."
 )
 
