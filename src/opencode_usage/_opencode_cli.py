@@ -130,3 +130,23 @@ def get_auth_path() -> Path:
 def get_config_path() -> Path:
     """Return the path to OpenCode's ``opencode.json`` config file."""
     return get_config_dir() / "opencode.json"
+
+
+@lru_cache(maxsize=1)
+def run_models() -> list[str]:
+    """Run ``opencode models`` and return the list of model identifiers."""
+    binary = _find_opencode()
+    if binary is None:
+        return []
+    try:
+        result = subprocess.run(
+            [binary, "models"],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        if result.returncode == 0:
+            return [line.strip() for line in result.stdout.splitlines() if line.strip()]
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    return []
