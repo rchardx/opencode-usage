@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn
 
+from .._opencode_cli import get_db_path
 from .analyze import extract_facets, generate_at_a_glance, run_aggregate_analysis
 from .cache import FacetCache
 from .extract import aggregate_all, filter_sessions
@@ -143,8 +144,7 @@ def run_insights(args: argparse.Namespace) -> None:
 
 def _default_db_path() -> str:
     """Return the default OpenCode database path."""
-    xdg = Path.home() / ".local" / "share"
-    return str(xdg / "opencode" / "opencode.db")
+    return str(get_db_path())
 
 
 def _resolve_since(config: InsightsConfig) -> datetime | None:
