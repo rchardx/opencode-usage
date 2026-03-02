@@ -73,3 +73,4 @@ class InsightsConfig:
     force: bool = False
     output_path: str = "./opencode-insights.html"
     concurrency: int | None = None
+
