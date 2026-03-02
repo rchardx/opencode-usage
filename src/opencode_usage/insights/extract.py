@@ -320,7 +320,7 @@ def extract_agent_stats(
     finally:
         conn.close()
 
-    result: dict[str, dict] = {}
+    result: dict[str, dict[str, Any]] = {}
     for r in rows:
         agent = r["agent"]
         if not agent:
@@ -368,7 +368,7 @@ def extract_model_stats(
     finally:
         conn.close()
 
-    result: dict[str, dict] = {}
+    result: dict[str, dict[str, Any]] = {}
     for r in rows:
         model = r["model"]
         if not model:
@@ -413,7 +413,7 @@ def extract_tool_stats(
     finally:
         conn.close()
 
-    result: dict[str, dict] = {}
+    result: dict[str, dict[str, int]] = {}
     for r in rows:
         tool = r["tool"]
         if not tool:

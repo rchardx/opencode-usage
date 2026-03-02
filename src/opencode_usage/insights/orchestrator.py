@@ -32,6 +32,7 @@ def run_insights(args: argparse.Namespace) -> None:
         since=getattr(args, "since", None),
         force=getattr(args, "force", False),
         output_path=getattr(args, "output", "./opencode-insights.html"),
+        concurrency=getattr(args, "concurrency", None),
     )
 
     db_path = getattr(args, "db", None) or _default_db_path()

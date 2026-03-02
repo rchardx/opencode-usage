@@ -120,7 +120,13 @@ def _build_parser() -> argparse.ArgumentParser:
         dest="force",
         help="Force re-analysis, ignoring cache",
     )
-
+    p.add_argument(
+        "--concurrency",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Max parallel LLM workers (default: min(cpu_count, 8))",
+    )
     p.add_argument(
         "--output",
         default="./opencode-insights.html",

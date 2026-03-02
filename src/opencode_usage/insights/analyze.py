@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
+import threading
 import time
 import warnings
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -142,6 +145,18 @@ def run_llm(
 
 
 _MAX_NEW_SESSIONS = 50
+_MAX_CONCURRENCY = 8
+
+
+def _default_concurrency(override: int | None = None) -> int:
+    """Return worker count: override > 0, else min(cpu_count, _MAX_CONCURRENCY)."""
+    if override is not None and override > 0:
+        return override
+    try:
+        cpu = os.cpu_count() or 4
+    except Exception:
+        cpu = 4
+    return min(cpu, _MAX_CONCURRENCY)
 
 
 def _count_outcomes(facets: dict[str, SessionFacet]) -> dict[str, int]:
@@ -182,6 +197,42 @@ def _count_goal_categories(facets: dict[str, SessionFacet]) -> dict[str, int]:
     return dict(counts)
 
 
+def _extract_single_facet(
+    db_path: Path | str,
+    sid: str,
+    model: str,
+) -> SessionFacet:
+    """Extract facets for a single session (thread-safe)."""
+    transcript = reconstruct_transcript(db_path, sid)
+    meta = extract_session_meta(db_path, sid)
+    meta_summary = (
+        f"Title: {meta.title}\n"
+        f"Duration: {meta.duration_minutes:.1f} min\n"
+        f"User messages: {meta.user_msg_count}\n"
+        f"Assistant messages: {meta.assistant_msg_count}\n"
+        f"Total tokens: {meta.total_tokens}\n"
+        f"Cost: ${meta.cost:.4f}\n"
+        f"Tools: {', '.join(meta.tool_counts) if meta.tool_counts else 'none'}\n"
+        f"Languages: {', '.join(meta.languages) if meta.languages else 'none'}\n"
+        f"Agents: {', '.join(meta.agent_counts) if meta.agent_counts else 'none'}"
+    )
+    prompt = build_facet_prompt(transcript, meta_summary)
+    llm_result = run_llm(prompt, model=model)
+    return SessionFacet(
+        session_id=sid,
+        underlying_goal=llm_result.get("underlying_goal", ""),
+        goal_categories=llm_result.get("goal_categories", {}),
+        outcome=llm_result.get("outcome", ""),
+        satisfaction=llm_result.get("satisfaction", {}),
+        helpfulness=llm_result.get("helpfulness", ""),
+        session_type=llm_result.get("session_type", ""),
+        friction_counts=llm_result.get("friction_counts", {}),
+        friction_detail=llm_result.get("friction_detail", ""),
+        primary_success=llm_result.get("primary_success", ""),
+        brief_summary=llm_result.get("brief_summary", ""),
+    )
+
+
 def extract_facets(
     db_path: Path | str,
     session_ids: list[str],
@@ -189,7 +240,7 @@ def extract_facets(
     cache: FacetCache | None = None,
     on_progress: Callable[[int, int], None] | None = None,
 ) -> dict[str, SessionFacet]:
-    """Extract per-session facets with caching."""
+    """Extract per-session facets with caching and concurrent LLM calls."""
     if cache is None:
         cache = FacetCache()
 
@@ -213,46 +264,39 @@ def extract_facets(
         uncached = uncached[:_MAX_NEW_SESSIONS]
 
     total = len(uncached)
-    for i, sid in enumerate(uncached):
-        if on_progress is not None:
-            on_progress(i + 1, total)
-        try:
-            transcript = reconstruct_transcript(db_path, sid)
-            meta = extract_session_meta(db_path, sid)
-            meta_summary = (
-                f"Title: {meta.title}\n"
-                f"Duration: {meta.duration_minutes:.1f} min\n"
-                f"User messages: {meta.user_msg_count}\n"
-                f"Assistant messages: {meta.assistant_msg_count}\n"
-                f"Total tokens: {meta.total_tokens}\n"
-                f"Cost: ${meta.cost:.4f}\n"
-                f"Tools: {', '.join(meta.tool_counts) if meta.tool_counts else 'none'}\n"
-                f"Languages: {', '.join(meta.languages) if meta.languages else 'none'}\n"
-                f"Agents: {', '.join(meta.agent_counts) if meta.agent_counts else 'none'}"
-            )
-            prompt = build_facet_prompt(transcript, meta_summary)
-            llm_result = run_llm(prompt, model=config.model)
-            facet = SessionFacet(
-                session_id=sid,
-                underlying_goal=llm_result.get("underlying_goal", ""),
-                goal_categories=llm_result.get("goal_categories", {}),
-                outcome=llm_result.get("outcome", ""),
-                satisfaction=llm_result.get("satisfaction", {}),
-                helpfulness=llm_result.get("helpfulness", ""),
-                session_type=llm_result.get("session_type", ""),
-                friction_counts=llm_result.get("friction_counts", {}),
-                friction_detail=llm_result.get("friction_detail", ""),
-                primary_success=llm_result.get("primary_success", ""),
-                brief_summary=llm_result.get("brief_summary", ""),
-            )
-            cache.put(sid, facet)
-            result[sid] = facet
-        except Exception:
-            warnings.warn(
-                f"Failed to extract facets for session {sid}",
-                stacklevel=2,
-            )
-            continue
+    if total == 0:
+        return result
+
+    workers = _default_concurrency(config.concurrency)
+    completed = 0
+    lock = threading.Lock()
+
+    def _on_done(sid: str, facet: SessionFacet | None) -> None:
+        nonlocal completed
+        with lock:
+            completed += 1
+            if facet is not None:
+                cache.put(sid, facet)
+                result[sid] = facet
+            if on_progress is not None:
+                on_progress(completed, total)
+
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        futures = {
+            executor.submit(_extract_single_facet, db_path, sid, config.model): sid
+            for sid in uncached
+        }
+        for future in as_completed(futures):
+            sid = futures[future]
+            try:
+                facet = future.result()
+                _on_done(sid, facet)
+            except Exception:
+                warnings.warn(
+                    f"Failed to extract facets for session {sid}",
+                    stacklevel=2,
+                )
+                _on_done(sid, None)
 
     return result
 
@@ -288,12 +332,20 @@ def run_aggregate_analysis(
     ]
 
     results: dict[str, dict] = {}
-    for key, builder in prompts:
+    workers = min(_default_concurrency(config.concurrency), len(prompts))
+
+    def _run_prompt(key: str, builder) -> tuple[str, dict]:
         try:
-            prompt = builder(aggregated_data)
-            results[key] = run_llm(prompt, model=config.model)
+            prompt_text = builder(aggregated_data)
+            return key, run_llm(prompt_text, model=config.model)
         except Exception:
-            results[key] = {}
+            return key, {}
+
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        futures = [executor.submit(_run_prompt, key, builder) for key, builder in prompts]
+        for future in as_completed(futures):
+            key, val = future.result()
+            results[key] = val
 
     return results
 
