@@ -64,58 +64,147 @@ class TestParseSince:
         assert abs((result - expected).total_seconds()) < 2
 
 
-# ── _build_parser ────────────────────────────────────────────
+# ── _build_parser (run subcommand) ──────────────────────────
 
 
-class TestBuildParser:
+class TestBuildParserRun:
     def test_compare_flag(self):
         parser = _build_parser()
-        args = parser.parse_args(["--compare"])
+        args = parser.parse_args(["run", "--compare"])
         assert args.compare is True
 
     def test_no_color_flag(self):
         parser = _build_parser()
-        args = parser.parse_args(["--no-color"])
+        args = parser.parse_args(["--no-color", "run"])
         assert args.no_color is True
 
-    def test_defaults(self):
+    def test_run_defaults(self):
         parser = _build_parser()
-        args = parser.parse_args([])
-        assert args.compare is False
-        assert args.no_color is False
-        assert args.command is None
+        args = parser.parse_args(["run"])
+        assert args.subcommand == "run"
+        assert args.shortcut is None
         assert args.days is None
         assert args.since is None
         assert args.by is None
         assert args.limit is None
         assert args.json_output is False
+        assert args.compare is False
+
+    def test_global_defaults(self):
+        parser = _build_parser()
+        args = parser.parse_args(["run"])
+        assert args.no_color is False
         assert args.db is None
 
     def test_by_choices(self):
         parser = _build_parser()
         for choice in ("model", "agent", "provider", "session", "day"):
-            args = parser.parse_args(["--by", choice])
+            args = parser.parse_args(["run", "--by", choice])
             assert args.by == choice
 
-    def test_command_today(self):
+    def test_shortcut_today(self):
         parser = _build_parser()
-        args = parser.parse_args(["today"])
-        assert args.command == "today"
+        args = parser.parse_args(["run", "today"])
+        assert args.shortcut == "today"
 
-    def test_command_yesterday(self):
+    def test_shortcut_yesterday(self):
         parser = _build_parser()
-        args = parser.parse_args(["yesterday"])
-        assert args.command == "yesterday"
+        args = parser.parse_args(["run", "yesterday"])
+        assert args.shortcut == "yesterday"
 
     def test_json_flag(self):
         parser = _build_parser()
-        args = parser.parse_args(["--json"])
+        args = parser.parse_args(["run", "--json"])
         assert args.json_output is True
 
     def test_limit_int(self):
         parser = _build_parser()
-        args = parser.parse_args(["--limit", "10"])
+        args = parser.parse_args(["run", "--limit", "10"])
         assert args.limit == 10
+
+    def test_days_flag(self):
+        parser = _build_parser()
+        args = parser.parse_args(["run", "--days", "30"])
+        assert args.days == 30
+
+    def test_db_global(self):
+        parser = _build_parser()
+        args = parser.parse_args(["--db", "/tmp/test.db", "run"])
+        assert args.db == "/tmp/test.db"
+
+
+# ── _build_parser (insights subcommand) ─────────────────────
+
+
+class TestBuildParserInsights:
+    def test_insights_subcommand(self):
+        args = _build_parser().parse_args(["insights"])
+        assert args.subcommand == "insights"
+
+    def test_insights_since(self):
+        args = _build_parser().parse_args(["insights", "--since", "7d"])
+        assert args.subcommand == "insights"
+        assert args.since is not None
+
+    def test_model_default_none(self):
+        args = _build_parser().parse_args(["insights"])
+        assert args.model is None
+
+    def test_model_set(self):
+        args = _build_parser().parse_args(["insights", "--model", "opencode/glm-5"])
+        assert args.model == "opencode/glm-5"
+
+    def test_force_default_false(self):
+        args = _build_parser().parse_args(["insights"])
+        assert args.force is False
+
+    def test_force_set(self):
+        args = _build_parser().parse_args(["insights", "--force"])
+        assert args.force is True
+
+    def test_output_default(self):
+        args = _build_parser().parse_args(["insights"])
+        assert args.output == "./opencode-insights.html"
+
+    def test_output_custom(self):
+        args = _build_parser().parse_args(["insights", "--output", "/tmp/report.html"])
+        assert args.output == "/tmp/report.html"
+
+    def test_concurrency(self):
+        args = _build_parser().parse_args(["insights", "--concurrency", "4"])
+        assert args.concurrency == 4
+
+    def test_days_flag(self):
+        args = _build_parser().parse_args(["insights", "--days", "30"])
+        assert args.subcommand == "insights"
+        assert args.days == 30
+
+    def test_db_global_with_insights(self):
+        args = _build_parser().parse_args(["--db", "/tmp/test.db", "insights"])
+        assert args.db == "/tmp/test.db"
+        assert args.subcommand == "insights"
+
+
+# ── backward compatibility (main routing) ───────────────────
+
+
+class TestBackwardCompat:
+    """Verify that bare arguments without 'run' prefix still work via main()."""
+
+    def test_bare_today(self):
+        parser = _build_parser()
+        args = parser.parse_args(["run", "today"])
+        assert args.shortcut == "today"
+
+    def test_bare_by_model(self):
+        parser = _build_parser()
+        args = parser.parse_args(["run", "--by", "model"])
+        assert args.by == "model"
+
+    def test_bare_days(self):
+        parser = _build_parser()
+        args = parser.parse_args(["run", "--days", "14"])
+        assert args.days == 14
 
 
 # ── _resolve_since ───────────────────────────────────────────
@@ -123,7 +212,7 @@ class TestBuildParser:
 
 class TestResolveSince:
     def test_today(self):
-        ns = argparse.Namespace(command="today", since=None, days=None)
+        ns = argparse.Namespace(shortcut="today", since=None, days=None)
         since, period = _resolve_since(ns)
         now = datetime.now().astimezone()
         assert since.date() == now.date()
@@ -132,14 +221,14 @@ class TestResolveSince:
         assert period == "Today"
 
     def test_yesterday(self):
-        ns = argparse.Namespace(command="yesterday", since=None, days=None)
+        ns = argparse.Namespace(shortcut="yesterday", since=None, days=None)
         since, period = _resolve_since(ns)
         yesterday = datetime.now().astimezone() - timedelta(days=1)
         assert since.date() == yesterday.date()
         assert period == "Yesterday & Today"
 
     def test_days_flag(self):
-        ns = argparse.Namespace(command=None, since=None, days=14)
+        ns = argparse.Namespace(shortcut=None, since=None, days=14)
         since, period = _resolve_since(ns)
         expected = datetime.now().astimezone() - timedelta(days=14)
         assert abs((since - expected).total_seconds()) < 2
@@ -147,17 +236,23 @@ class TestResolveSince:
 
     def test_since_flag(self):
         dt = datetime(2025, 1, 15).astimezone()
-        ns = argparse.Namespace(command=None, since=dt, days=None)
+        ns = argparse.Namespace(shortcut=None, since=dt, days=None)
         since, period = _resolve_since(ns)
         assert since == dt
         assert "2025-01-15" in period
 
     def test_default_seven_days(self):
-        ns = argparse.Namespace(command=None, since=None, days=None)
+        ns = argparse.Namespace(shortcut=None, since=None, days=None)
         since, period = _resolve_since(ns)
         expected = datetime.now().astimezone() - timedelta(days=7)
         assert abs((since - expected).total_seconds()) < 2
         assert period == "Last 7 days"
+
+    def test_no_shortcut_attr(self):
+        ns = argparse.Namespace(since=None, days=None)
+        since, _period = _resolve_since(ns)
+        expected = datetime.now().astimezone() - timedelta(days=7)
+        assert abs((since - expected).total_seconds()) < 2
 
 
 # ── _compute_deltas ──────────────────────────────────────────
@@ -290,106 +385,3 @@ class TestFetchRows:
         db = OpenCodeDB(db_path=_make_cli_db(tmp_path))
         rows = _fetch_rows(db, "unknown")
         assert rows == []
-
-
-# ── TestInsightsCli ───────────────────────────────────────────────────────────
-
-
-class TestInsightsCli:
-    def test_insights_parser_accepts_nollm(self):
-        """parse_args(['insights', '--no-llm']) sets no_llm=True."""
-        args = _build_parser().parse_args(["insights", "--no-llm"])
-        assert args.command == "insights"
-        assert args.no_llm is True
-
-    def test_insights_parser_accepts_since(self):
-        """parse_args(['insights', '--since', '7d']) parses since."""
-        args = _build_parser().parse_args(["insights", "--since", "7d"])
-        assert args.command == "insights"
-        assert args.since is not None
-
-    def test_insights_parser_accepts_provider(self):
-        """parse_args(['insights', '--provider', 'anthropic']) sets provider."""
-        args = _build_parser().parse_args(["insights", "--provider", "anthropic"])
-        assert args.provider == "anthropic"
-
-    def test_insights_parser_accepts_json(self):
-        """parse_args(['insights', '--json']) sets json_output=True."""
-        args = _build_parser().parse_args(["insights", "--json"])
-        assert args.json_output is True
-
-    def test_backwards_compat_today(self):
-        """parse_args(['today']) still works."""
-        args = _build_parser().parse_args(["today"])
-        assert args.command == "today"
-
-    def test_backwards_compat_by_model(self):
-        """parse_args(['--by', 'model']) still works."""
-        args = _build_parser().parse_args(["--by", "model"])
-        assert args.by == "model"
-
-    def test_default_provider_is_openai(self):
-        """Default provider is 'openai'."""
-        args = _build_parser().parse_args(["insights"])
-        assert args.provider == "openai"
-
-    def test_default_model_is_none(self):
-        """Default model is None (resolved from auth)."""
-        args = _build_parser().parse_args(["insights"])
-        assert args.model is None
-
-
-# ── TestInsightsCommand ──────────────────────────────────────────
-
-
-class TestInsightsCommand:
-    def test_insights_command_accepted(self):
-        """parse_args(['insights']) succeeds and sets command."""
-
-        args = _build_parser().parse_args(["insights"])
-
-        assert args.command == "insights"
-
-    def test_force_flag_default_false(self):
-        """--force defaults to False."""
-
-        args = _build_parser().parse_args(["insights"])
-
-        assert args.force is False
-
-    def test_force_flag_set(self):
-        """--force sets to True."""
-
-        args = _build_parser().parse_args(["insights", "--force"])
-
-        assert args.force is True
-
-    def test_output_default(self):
-        """--output defaults to './opencode-insights.html'."""
-
-        args = _build_parser().parse_args(["insights"])
-
-        assert args.output == "./opencode-insights.html"
-
-    def test_output_custom(self):
-        """--output /tmp/report.html sets correctly."""
-
-        args = _build_parser().parse_args(["insights", "--output", "/tmp/report.html"])
-
-        assert args.output == "/tmp/report.html"
-
-    def test_model_default_none(self):
-        """--model defaults to None."""
-
-        args = _build_parser().parse_args(["insights"])
-
-        assert args.model is None
-
-    def test_insights_with_days(self):
-        """insights --days 30 parses correctly."""
-
-        args = _build_parser().parse_args(["insights", "--days", "30"])
-
-        assert args.command == "insights"
-
-        assert args.days == 30

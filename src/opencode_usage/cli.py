@@ -27,7 +27,6 @@ def _parse_since(value: str) -> datetime:
         }[unit]
         return datetime.now().astimezone() - delta
 
-    # Try ISO date
     try:
         dt = datetime.fromisoformat(value)
         if dt.tzinfo is None:
@@ -41,6 +40,27 @@ def _parse_since(value: str) -> datetime:
     )
 
 
+_RUN_SHORTCUTS = ("today", "yesterday")
+
+
+def _add_time_args(parser: argparse.ArgumentParser) -> None:
+    """Add --days and --since to *parser* (shared by run & insights)."""
+    parser.add_argument(
+        "--days",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Show last N days (default: 7)",
+    )
+    parser.add_argument(
+        "--since",
+        type=_parse_since,
+        default=None,
+        metavar="SPEC",
+        help="Time filter: '7d', '2w', '30d', '3h', or ISO date",
+    )
+
+
 def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="opencode-usage",
@@ -48,49 +68,10 @@ def _build_parser() -> argparse.ArgumentParser:
     )
 
     p.add_argument(
-        "command",
-        nargs="?",
+        "--db",
         default=None,
-        choices=["today", "yesterday", "insights"],
-        help="Quick shortcut: 'today' or 'yesterday'",
-    )
-    p.add_argument(
-        "--days",
-        type=int,
-        default=None,
-        metavar="N",
-        help="Show last N days (default: 7)",
-    )
-    p.add_argument(
-        "--since",
-        type=_parse_since,
-        default=None,
-        metavar="SPEC",
-        help="Time filter: '7d', '2w', '30d', '3h', or ISO date",
-    )
-    p.add_argument(
-        "--by",
-        choices=["model", "agent", "provider", "session", "day"],
-        default=None,
-        help="Group results by dimension",
-    )
-    p.add_argument(
-        "--limit",
-        type=int,
-        default=None,
-        metavar="N",
-        help="Max rows to display",
-    )
-    p.add_argument(
-        "--json",
-        action="store_true",
-        dest="json_output",
-        help="Output as JSON",
-    )
-    p.add_argument(
-        "--compare",
-        action="store_true",
-        help="Compare with previous period of same length",
+        metavar="PATH",
+        help="Path to OpenCode database (default: auto-detect)",
     )
     p.add_argument(
         "--no-color",
@@ -98,47 +79,72 @@ def _build_parser() -> argparse.ArgumentParser:
         dest="no_color",
         help="Disable colored output",
     )
-    p.add_argument(
-        "--no-llm",
+
+    sub = p.add_subparsers(dest="subcommand")
+
+    # ── run ──────────────────────────────────────────────────
+    run_p = sub.add_parser("run", help="Token usage statistics (default)")
+    run_p.add_argument(
+        "shortcut",
+        nargs="?",
+        default=None,
+        choices=list(_RUN_SHORTCUTS),
+        help="Quick shortcut: 'today' or 'yesterday'",
+    )
+    _add_time_args(run_p)
+    run_p.add_argument(
+        "--by",
+        choices=["model", "agent", "provider", "session", "day"],
+        default=None,
+        help="Group results by dimension",
+    )
+    run_p.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Max rows to display",
+    )
+    run_p.add_argument(
+        "--json",
         action="store_true",
-        dest="no_llm",
-        help="Quantitative insights only, no LLM calls",
+        dest="json_output",
+        help="Output as JSON",
     )
-    p.add_argument(
-        "--provider",
-        default="openai",
-        help="LLM provider name (from auth.json)",
+    run_p.add_argument(
+        "--compare",
+        action="store_true",
+        help="Compare with previous period of same length",
     )
-    p.add_argument(
+
+    # ── insights ────────────────────────────────────────────
+    ins_p = sub.add_parser("insights", help="LLM-powered usage analysis report")
+    _add_time_args(ins_p)
+    ins_p.add_argument(
         "--model",
         default=None,
-        help="LLM model to use for insights analysis",
+        help="Model ID for insights analysis (interactive picker if omitted)",
     )
-    p.add_argument(
+    ins_p.add_argument(
         "--force",
         action="store_true",
         dest="force",
         help="Force re-analysis, ignoring cache",
     )
-    p.add_argument(
+    ins_p.add_argument(
         "--concurrency",
         type=int,
         default=None,
         metavar="N",
         help="Max parallel LLM workers (default: min(cpu_count, 8))",
     )
-    p.add_argument(
+    ins_p.add_argument(
         "--output",
         default="./opencode-insights.html",
         metavar="PATH",
         help="Output path for HTML report",
     )
-    p.add_argument(
-        "--db",
-        default=None,
-        metavar="PATH",
-        help="Path to OpenCode database (default: auto-detect)",
-    )
+
     return p
 
 
@@ -146,11 +152,13 @@ def _resolve_since(args: argparse.Namespace) -> tuple[datetime | None, str]:
     """Resolve the effective 'since' datetime and a human-readable period label."""
     now = datetime.now().astimezone()
 
-    if args.command == "today":
+    shortcut = getattr(args, "shortcut", None)
+
+    if shortcut == "today":
         since = now.replace(hour=0, minute=0, second=0, microsecond=0)
         return since, "Today"
 
-    if args.command == "yesterday":
+    if shortcut == "yesterday":
         yesterday = now - timedelta(days=1)
         since = yesterday.replace(hour=0, minute=0, second=0, microsecond=0)
         return since, "Yesterday & Today"
@@ -162,7 +170,6 @@ def _resolve_since(args: argparse.Namespace) -> tuple[datetime | None, str]:
         since = now - timedelta(days=args.days)
         return since, f"Last {args.days} days"
 
-    # Default: last 7 days
     since = now - timedelta(days=7)
     return since, "Last 7 days"
 
@@ -210,26 +217,8 @@ def _compute_deltas(
     return deltas
 
 
-def run_insights_new(args: argparse.Namespace) -> None:
-    """Stub for new HTML-based insights pipeline."""
-
-    render.console.print("[dim]Insights pipeline not yet implemented[/dim]")
-
-
-def main(argv: list[str] | None = None) -> None:
-    parser = _build_parser()
-    args = parser.parse_args(argv)
-
-    if args.no_color:
-        configure_console(no_color=True)
-
-    # Insights command — dispatch before standard flow
-    if args.command == "insights":
-        from .insights.orchestrator import run_insights
-
-        run_insights(args)
-        return
-
+def _cmd_run(args: argparse.Namespace) -> None:
+    """Execute the ``run`` subcommand."""
     try:
         db = OpenCodeDB(db_path=args.db)
     except FileNotFoundError as e:
@@ -239,18 +228,15 @@ def main(argv: list[str] | None = None) -> None:
     since, period = _resolve_since(args)
     group_by = args.by or "day"
 
-    # Compute previous period for --compare
     now = datetime.now().astimezone()
     prev_since = None
     if args.compare and since is not None:
         period_length = now - since
         prev_since = since - period_length
 
-    # Fetch current data
     rows = _fetch_rows(db, group_by, since=since, limit=args.limit)
     total = db.totals(since=since)
 
-    # Fetch previous period data for --compare
     prev_total = None
     prev_rows: list[UsageRow] = []
     if prev_since is not None:
@@ -258,7 +244,6 @@ def main(argv: list[str] | None = None) -> None:
         if group_by != "day":
             prev_rows = _fetch_rows(db, group_by, since=prev_since, until=since, limit=args.limit)
 
-    # JSON output
     if args.json_output:
         output: dict[str, Any] = {
             "period": period,
@@ -272,7 +257,6 @@ def main(argv: list[str] | None = None) -> None:
         print(json.dumps(output, indent=2, ensure_ascii=False))
         return
 
-    # Rich output
     render_summary(total, period, prev_total=prev_total)
     render.console.print()
 
@@ -282,3 +266,38 @@ def main(argv: list[str] | None = None) -> None:
         render_daily(rows, period)
     else:
         render_grouped(rows, group_by, period, deltas=deltas)
+
+
+def _cmd_insights(args: argparse.Namespace) -> None:
+    """Execute the ``insights`` subcommand."""
+    if args.model is None:
+        from .models import select_model_interactive
+
+        args.model = select_model_interactive(render.console)
+
+    from .insights.orchestrator import run_insights
+
+    run_insights(args)
+
+
+def _is_run_shortcut(token: str) -> bool:
+    """Return True if *token* looks like a bare ``run`` shortcut (today/yesterday)."""
+    return token in _RUN_SHORTCUTS
+
+
+def main(argv: list[str] | None = None) -> None:
+    parser = _build_parser()
+    raw = argv if argv is not None else sys.argv[1:]
+
+    if not raw or (raw[0] not in ("run", "insights") and not raw[0].startswith("-")):
+        raw = ["run", *raw]
+
+    args = parser.parse_args(raw)
+
+    if args.no_color:
+        configure_console(no_color=True)
+
+    if args.subcommand == "insights":
+        _cmd_insights(args)
+    else:
+        _cmd_run(args)
