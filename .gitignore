@@ -26,3 +26,6 @@ Thumbs.db
 # Sisyphus working files
 .sisyphus/
 
+# Generated reports
+opencode-insights.html
+
