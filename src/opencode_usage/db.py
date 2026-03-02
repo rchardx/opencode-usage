@@ -3,22 +3,18 @@
 from __future__ import annotations
 
 import json
-import os
 import sqlite3
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from ._insights_legacy import SessionMeta
+from ._opencode_cli import get_db_path
 
 
 def _default_db_path() -> Path:
     """Resolve the OpenCode database path per platform."""
-    if custom := os.environ.get("OPENCODE_DB"):
-        return Path(custom)
-    base = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share"))
-    return base / "opencode" / "opencode.db"
+    return get_db_path()
 
 
 @dataclass
@@ -40,6 +36,25 @@ class UsageRow:
     tokens: TokenStats = field(default_factory=TokenStats)
     cost: float = 0.0
     detail: str | None = None
+
+
+@dataclass
+class SessionMeta:
+    """Metadata about a user session."""
+
+    session_id: str
+    title: str
+    parent_id: str | None
+    start_time: datetime
+    duration_minutes: float
+    message_count: int
+    user_message_count: int
+    total_tokens: int
+    total_cost: float
+    agents: list[str]
+    models: list[str]
+    tool_counts: dict[str, int]
+    tool_errors: int
 
 
 class OpenCodeDB:

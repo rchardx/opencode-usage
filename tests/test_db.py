@@ -7,6 +7,7 @@ import sqlite3
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 import pytest
 
@@ -440,10 +441,11 @@ class TestDefaultDbPath:
         assert Path(result) == Path("/custom/path.db")
 
     def test_xdg_data_home_override(self, monkeypatch):
-        """Test XDG_DATA_HOME env var affects path."""
+        """Test XDG_DATA_HOME env var affects path when CLI unavailable."""
         monkeypatch.delenv("OPENCODE_DB", raising=False)
         monkeypatch.setenv("XDG_DATA_HOME", "/custom/xdg")
-        result = _default_db_path()
+        with patch("opencode_usage._opencode_cli._find_opencode", return_value=None):
+            result = _default_db_path()
         # Check that it uses XDG_DATA_HOME as base
         assert result.name == "opencode.db"
         assert result.parent.name == "opencode"
