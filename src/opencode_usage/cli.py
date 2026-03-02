@@ -217,46 +217,18 @@ def main(argv: list[str] | None = None) -> None:
     if args.no_color:
         configure_console(no_color=True)
 
+    # Insights command — dispatch before standard flow
+    if args.command == "insights":
+        from .insights.orchestrator import run_insights
+
+        run_insights(args)
+        return
+
     try:
         db = OpenCodeDB(db_path=args.db)
     except FileNotFoundError as e:
         render.console.print(f"[red]Error:[/red] {e}")
         sys.exit(1)
-
-    # Insights command — dispatch before standard flow
-    if args.command == "insights":
-        from ._insights_legacy import run_insights
-        from .auth import resolve_credentials
-        from .render import render_insights, render_insights_progress
-
-        credentials = None
-        if not args.no_llm:
-            try:
-                credentials = resolve_credentials(args.provider, model=args.model)
-            except RuntimeError as e:
-                render.console.print(f"[yellow]Warning:[/] {e}")
-                render.console.print("Running in quantitative-only mode.")
-        since_ins, period_ins = _resolve_since(args)
-
-        def _on_progress(current: int, total: int) -> None:
-            render_insights_progress(current, total)
-
-        result = run_insights(
-            db,
-            since_ins,
-            None,
-            credentials=credentials,
-            no_llm=args.no_llm or credentials is None,
-            on_progress=_on_progress,
-        )
-        if args.json_output:
-            from ._insights_legacy import insights_to_dict
-
-            output = insights_to_dict(result)
-            print(json.dumps(output, indent=2, ensure_ascii=False))
-        else:
-            render_insights(result, period_ins)
-        return
 
     since, period = _resolve_since(args)
     group_by = args.by or "day"
