@@ -193,7 +193,7 @@ class TestAggregatedStats:
 
 class TestInsightsConfig:
     def test_defaults(self):
-        config = InsightsConfig()
+        config = InsightsConfig(model="opencode/minimax-m2.5-free")
         assert config.model == "opencode/minimax-m2.5-free"
         assert config.days is None
         assert config.since is None

@@ -67,10 +67,9 @@ class AggregatedStats:
 class InsightsConfig:
     """Configuration for the insights pipeline."""
 
-    model: str = "opencode/minimax-m2.5-free"
+    model: str
     days: int | None = None
     since: datetime | None = None
     force: bool = False
     output_path: str = "./opencode-insights.html"
     concurrency: int | None = None
-

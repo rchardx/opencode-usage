@@ -28,7 +28,7 @@ def run_insights(args: argparse.Namespace) -> None:
     """Orchestrate the full insights pipeline: extract → analyze → report."""
     # Build config from args
     config = InsightsConfig(
-        model=args.model or "opencode/minimax-m2.5-free",
+        model=args.model,
         days=getattr(args, "days", None),
         since=getattr(args, "since", None),
         force=getattr(args, "force", False),

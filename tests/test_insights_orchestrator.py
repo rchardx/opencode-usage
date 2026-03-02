@@ -48,30 +48,30 @@ def _mock_stats() -> AggregatedStats:
 class TestResolveSince:
     def test_uses_since_when_set(self):
         dt = datetime(2025, 1, 1).astimezone()
-        config = InsightsConfig(since=dt)
+        config = InsightsConfig(model="test-model", since=dt)
         result = _resolve_since(config)
         assert result == dt
 
     def test_uses_days_when_set(self):
-        config = InsightsConfig(days=7)
+        config = InsightsConfig(model="test-model", days=7)
         result = _resolve_since(config)
         expected = datetime.now().astimezone() - timedelta(days=7)
         assert abs((result - expected).total_seconds()) < 5
 
     def test_defaults_to_30_days(self):
-        config = InsightsConfig()
+        config = InsightsConfig(model="test-model")
         result = _resolve_since(config)
         expected = datetime.now().astimezone() - timedelta(days=30)
         assert abs((result - expected).total_seconds()) < 5
 
     def test_since_takes_precedence_over_days(self):
         dt = datetime(2025, 6, 15).astimezone()
-        config = InsightsConfig(since=dt, days=7)
+        config = InsightsConfig(model="test-model", since=dt, days=7)
         result = _resolve_since(config)
         assert result == dt
 
     def test_returns_datetime_type(self):
-        config = InsightsConfig(days=14)
+        config = InsightsConfig(model="test-model", days=14)
         result = _resolve_since(config)
         assert isinstance(result, datetime)
 
@@ -371,37 +371,6 @@ class TestRunInsights:
         assert delegation["root_sessions"] == 5
         assert delegation["sub_sessions"] == 30  # sum of top_agents counts
         assert delegation["sub_types"] == {"build": 30}
-
-    @patch("opencode_usage.insights.orchestrator.generate_report")
-    @patch("opencode_usage.insights.orchestrator.generate_at_a_glance")
-    @patch("opencode_usage.insights.orchestrator.run_aggregate_analysis")
-    @patch("opencode_usage.insights.orchestrator.extract_facets")
-    @patch("opencode_usage.insights.orchestrator.aggregate_all")
-    @patch("opencode_usage.insights.orchestrator.filter_sessions")
-    def test_default_model_when_none(
-        self,
-        mock_filter,
-        mock_aggregate,
-        mock_extract_facets,
-        mock_run_aggregate,
-        mock_at_a_glance,
-        mock_generate_report,
-        tmp_path,
-    ):
-        output_path = tmp_path / "test.html"
-        mock_filter.return_value = []
-        mock_aggregate.return_value = _mock_stats()
-        mock_extract_facets.return_value = {}
-        mock_run_aggregate.return_value = {}
-        mock_at_a_glance.return_value = {}
-        mock_generate_report.return_value = "<html></html>"
-
-        args = _make_args(output=str(output_path), model=None)
-        run_insights(args)
-
-        call_args = mock_extract_facets.call_args
-        config_arg = call_args[1].get("config") or call_args[0][2]
-        assert config_arg.model == "opencode/minimax-m2.5-free"
 
     def test_extract_phase_file_not_found_exits(self, tmp_path):
         """When DB not found in Phase 1, sys.exit(1) is called."""

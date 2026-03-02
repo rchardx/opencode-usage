@@ -241,7 +241,7 @@ class TestFacetExtraction:
         return cache
 
     def _make_config(self, force=False):
-        return InsightsConfig(force=force)
+        return InsightsConfig(model="test-model", force=force)
 
     @patch("opencode_usage.insights.analyze.run_llm", return_value=_MOCK_FACET_RESULT)
     @patch("opencode_usage.insights.analyze.extract_session_meta")
@@ -336,7 +336,7 @@ class TestAggregatedAnalysis:
         )
 
     def _make_config(self):
-        return InsightsConfig()
+        return InsightsConfig(model="test-model")
 
     @patch("opencode_usage.insights.analyze.run_llm", return_value={"result": "ok"})
     def test_run_aggregate_analysis_calls_all_7_prompts(self, mock_llm):
@@ -394,7 +394,7 @@ class TestAtAGlance:
         )
 
     def _make_config(self):
-        return InsightsConfig()
+        return InsightsConfig(model="test-model")
 
     @patch(
         "opencode_usage.insights.analyze.run_llm",
