@@ -297,7 +297,7 @@ def extract_agent_stats(
     db_path: Path | str,
     since: datetime | None,
     until: datetime | None = None,
-) -> dict[str, dict]:
+) -> dict[str, dict[str, Any]]:
     """Agent-level aggregated statistics."""
     time_clause, params = _time_params(since, until)
     sql = f"""
@@ -345,7 +345,7 @@ def extract_model_stats(
     db_path: Path | str,
     since: datetime | None,
     until: datetime | None = None,
-) -> dict[str, dict]:
+) -> dict[str, dict[str, Any]]:
     """Model-level aggregated statistics."""
     time_clause, params = _time_params(since, until)
     sql = f"""
@@ -393,7 +393,7 @@ def extract_tool_stats(
     db_path: Path | str,
     since: datetime | None,
     until: datetime | None = None,
-) -> dict[str, dict]:
+) -> dict[str, dict[str, int]]:
     """Tool completion/error counts from the part table."""
     time_clause, params = _time_params(since, until)
     sql = f"""
@@ -457,7 +457,7 @@ def extract_delegation_stats(
     db_path: Path | str,
     since: datetime | None,
     until: datetime | None = None,
-) -> dict:
+) -> dict[str, Any]:
     """Session hierarchy statistics."""
     time_clause, params = _session_time_params(since, until)
     sql = f"""
@@ -491,10 +491,10 @@ def extract_delegation_stats(
     depths: dict[str, int] = {}
     for sid in parent_map:
         depth = 0
-        current = sid
-        while parent_map.get(current) is not None:
+        current: str | None = sid
+        while current is not None and parent_map.get(current) is not None:
             depth += 1
-            current = parent_map[current]  # type: ignore[assignment]
+            current = parent_map[current]
         depths[sid] = depth
 
     max_depth = max(depths.values()) if depths else 0

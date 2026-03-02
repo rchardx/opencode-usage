@@ -5,6 +5,28 @@ from __future__ import annotations
 import json
 import subprocess
 import time
+import warnings
+from collections import defaultdict
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+from .cache import FacetCache
+from .extract import extract_session_meta, reconstruct_transcript
+from .prompts import (
+    build_agent_performance_prompt,
+    build_at_a_glance_prompt,
+    build_facet_prompt,
+    build_friction_prompt,
+    build_horizon_prompt,
+    build_interaction_style_prompt,
+    build_project_areas_prompt,
+    build_suggestions_prompt,
+    build_tool_health_prompt,
+)
+from .types import AggregatedStats, InsightsConfig, SessionFacet
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 def parse_ndjson(output: str) -> tuple[str, float, dict[str, int]]:
@@ -117,3 +139,183 @@ def run_llm(
         return extract_json_from_response(text)
 
     raise TimeoutError("opencode run timed out after 3 attempts") from last_exc
+
+
+_MAX_NEW_SESSIONS = 50
+
+
+def _count_outcomes(facets: dict[str, SessionFacet]) -> dict[str, int]:
+    """Count outcome values across facets."""
+    counts: dict[str, int] = defaultdict(int)
+    for f in facets.values():
+        if f.outcome:
+            counts[f.outcome] += 1
+    return dict(counts)
+
+
+def _count_satisfaction(facets: dict[str, SessionFacet]) -> dict[str, int]:
+    """Count satisfaction keys set to 1 across facets."""
+    counts: dict[str, int] = defaultdict(int)
+    for f in facets.values():
+        for key, val in f.satisfaction.items():
+            if val:
+                counts[key] += 1
+    return dict(counts)
+
+
+def _count_friction(facets: dict[str, SessionFacet]) -> dict[str, int]:
+    """Sum friction counts across facets."""
+    counts: dict[str, int] = defaultdict(int)
+    for f in facets.values():
+        for key, val in f.friction_counts.items():
+            counts[key] += val
+    return dict(counts)
+
+
+def _count_goal_categories(facets: dict[str, SessionFacet]) -> dict[str, int]:
+    """Count goal categories set to 1 across facets."""
+    counts: dict[str, int] = defaultdict(int)
+    for f in facets.values():
+        for key, val in f.goal_categories.items():
+            if val:
+                counts[key] += 1
+    return dict(counts)
+
+
+def extract_facets(
+    db_path: Path | str,
+    session_ids: list[str],
+    config: InsightsConfig,
+    cache: FacetCache | None = None,
+    on_progress: Callable[[int, int], None] | None = None,
+) -> dict[str, SessionFacet]:
+    """Extract per-session facets with caching."""
+    if cache is None:
+        cache = FacetCache()
+
+    result: dict[str, SessionFacet] = {}
+
+    if config.force:
+        uncached = list(session_ids)
+        cached_ids: list[str] = []
+    else:
+        cached_ids = [sid for sid in session_ids if cache.has(sid)]
+        uncached = [sid for sid in session_ids if not cache.has(sid)]
+
+    # Load cached facets
+    for sid in cached_ids:
+        facet = cache.get(sid)
+        if facet is not None:
+            result[sid] = facet
+
+    # Limit new sessions
+    if not config.force:
+        uncached = uncached[:_MAX_NEW_SESSIONS]
+
+    total = len(uncached)
+    for i, sid in enumerate(uncached):
+        if on_progress is not None:
+            on_progress(i + 1, total)
+        try:
+            transcript = reconstruct_transcript(db_path, sid)
+            meta = extract_session_meta(db_path, sid)
+            meta_summary = (
+                f"Title: {meta.title}\n"
+                f"Duration: {meta.duration_minutes:.1f} min\n"
+                f"User messages: {meta.user_msg_count}\n"
+                f"Assistant messages: {meta.assistant_msg_count}\n"
+                f"Total tokens: {meta.total_tokens}\n"
+                f"Cost: ${meta.cost:.4f}\n"
+                f"Tools: {', '.join(meta.tool_counts) if meta.tool_counts else 'none'}\n"
+                f"Languages: {', '.join(meta.languages) if meta.languages else 'none'}\n"
+                f"Agents: {', '.join(meta.agent_counts) if meta.agent_counts else 'none'}"
+            )
+            prompt = build_facet_prompt(transcript, meta_summary)
+            llm_result = run_llm(prompt, model=config.model)
+            facet = SessionFacet(
+                session_id=sid,
+                underlying_goal=llm_result.get("underlying_goal", ""),
+                goal_categories=llm_result.get("goal_categories", {}),
+                outcome=llm_result.get("outcome", ""),
+                satisfaction=llm_result.get("satisfaction", {}),
+                helpfulness=llm_result.get("helpfulness", ""),
+                session_type=llm_result.get("session_type", ""),
+                friction_counts=llm_result.get("friction_counts", {}),
+                friction_detail=llm_result.get("friction_detail", ""),
+                primary_success=llm_result.get("primary_success", ""),
+                brief_summary=llm_result.get("brief_summary", ""),
+            )
+            cache.put(sid, facet)
+            result[sid] = facet
+        except Exception:
+            warnings.warn(
+                f"Failed to extract facets for session {sid}",
+                stacklevel=2,
+            )
+            continue
+
+    return result
+
+
+def run_aggregate_analysis(
+    facets: dict[str, SessionFacet],
+    stats: AggregatedStats,
+    config: InsightsConfig,
+) -> dict[str, dict]:
+    """Run 7 aggregate LLM prompts and return results."""
+    aggregated_data = {
+        "session_count": stats.total_sessions,
+        "analyzed_count": len(facets),
+        "total_cost": stats.total_cost,
+        "top_agents": stats.top_agents,
+        "top_models": stats.top_models,
+        "top_tools": stats.top_tools,
+        "outcome_distribution": _count_outcomes(facets),
+        "satisfaction_distribution": _count_satisfaction(facets),
+        "friction_distribution": _count_friction(facets),
+        "session_summaries": [f.brief_summary for f in facets.values() if f.brief_summary][:20],
+        "goal_categories": _count_goal_categories(facets),
+    }
+
+    prompts = [
+        ("project_areas", build_project_areas_prompt),
+        ("interaction_style", build_interaction_style_prompt),
+        ("agent_performance", build_agent_performance_prompt),
+        ("friction", build_friction_prompt),
+        ("suggestions", build_suggestions_prompt),
+        ("tool_health", build_tool_health_prompt),
+        ("horizon", build_horizon_prompt),
+    ]
+
+    results: dict[str, dict] = {}
+    for key, builder in prompts:
+        try:
+            prompt = builder(aggregated_data)
+            results[key] = run_llm(prompt, model=config.model)
+        except Exception:
+            results[key] = {}
+
+    return results
+
+
+def generate_at_a_glance(
+    aggregate_results: dict[str, dict],
+    stats: AggregatedStats,
+    config: InsightsConfig,
+) -> dict:
+    """Synthesize all insights into an at-a-glance summary."""
+    stats_summary = {
+        "total_sessions": stats.total_sessions,
+        "analyzed_sessions": stats.analyzed_sessions,
+        "date_range": stats.date_range,
+        "total_messages": stats.total_messages,
+        "total_cost": stats.total_cost,
+        "top_tools": stats.top_tools,
+        "top_agents": stats.top_agents,
+        "top_models": stats.top_models,
+    }
+    try:
+        prompt = build_at_a_glance_prompt(aggregate_results, stats_summary)
+        return run_llm(prompt, model=config.model)
+    except Exception:
+        return {}
