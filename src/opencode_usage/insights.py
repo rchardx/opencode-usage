@@ -454,3 +454,65 @@ def run_insights(
         what_works=what_works,
         friction=friction,
     )
+
+
+def insights_to_dict(result: InsightsResult) -> dict[str, Any]:
+    """Convert InsightsResult to a JSON-serializable dict."""
+    q = result.quantitative
+    quant_dict: dict[str, Any] = {
+        "cache_efficiency": {k: round(v, 4) for k, v in q.cache_efficiency.items()},
+        "cost_per_1k": {k: round(v, 6) for k, v in q.cost_per_1k.items()},
+        "tool_error_rates": {k: round(v, 4) for k, v in q.tool_error_rates.items()},
+        "avg_tokens_per_session": round(q.avg_tokens_per_session),
+        "agent_delegation": q.agent_delegation,
+        "top_sessions": [
+            {
+                "session_id": s.session_id,
+                "title": s.title,
+                "total_tokens": s.total_tokens,
+                "total_cost": round(s.total_cost, 4),
+                "agents": s.agents,
+                "models": s.models,
+            }
+            for s in q.top_sessions
+        ],
+    }
+    out: dict[str, Any] = {
+        "period": result.period,
+        "quantitative": quant_dict,
+    }
+    if result.facets is not None:
+        out["facets"] = [
+            {
+                "session_id": cf.session_id,
+                "facet": {
+                    "underlying_goal": cf.facet.underlying_goal,
+                    "goal_categories": cf.facet.goal_categories,
+                    "outcome": cf.facet.outcome,
+                    "satisfaction_counts": cf.facet.satisfaction_counts,
+                    "friction_counts": cf.facet.friction_counts,
+                    "friction_detail": cf.facet.friction_detail,
+                    "session_type": cf.facet.session_type,
+                    "primary_success": cf.facet.primary_success,
+                    "brief_summary": cf.facet.brief_summary,
+                    "helpfulness": cf.facet.helpfulness,
+                },
+            }
+            for cf in result.facets
+        ]
+    if result.suggestions is not None:
+        out["suggestions"] = [
+            {
+                "category": s.category,
+                "finding": s.finding,
+                "recommendation": s.recommendation,
+            }
+            for s in result.suggestions
+        ]
+    if result.interaction_style is not None:
+        out["interaction_style"] = result.interaction_style
+    if result.what_works is not None:
+        out["what_works"] = result.what_works
+    if result.friction is not None:
+        out["friction"] = result.friction
+    return out

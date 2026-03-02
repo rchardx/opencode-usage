@@ -231,10 +231,10 @@ def main(argv: list[str] | None = None) -> None:
             on_progress=_on_progress,
         )
         if args.json_output:
-            # JSON output handled by Task 11 — placeholder for now
-            import json as _json
+            from .insights import insights_to_dict
 
-            print(_json.dumps({"period": period_ins, "quantitative": {}}, indent=2))
+            output = insights_to_dict(result)
+            print(json.dumps(output, indent=2, ensure_ascii=False))
         else:
             render_insights(result, period_ins)
         return
