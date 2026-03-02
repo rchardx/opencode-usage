@@ -51,7 +51,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "command",
         nargs="?",
         default=None,
-        choices=["today", "yesterday"],
+        choices=["today", "yesterday", "insights"],
         help="Quick shortcut: 'today' or 'yesterday'",
     )
     p.add_argument(
@@ -97,6 +97,22 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         dest="no_color",
         help="Disable colored output",
+    )
+    p.add_argument(
+        "--no-llm",
+        action="store_true",
+        dest="no_llm",
+        help="Quantitative insights only, no LLM calls",
+    )
+    p.add_argument(
+        "--provider",
+        default="openai",
+        help="LLM provider name (from auth.json)",
+    )
+    p.add_argument(
+        "--model",
+        default=None,
+        help="LLM model to use for insights analysis",
     )
     p.add_argument(
         "--db",
@@ -187,6 +203,41 @@ def main(argv: list[str] | None = None) -> None:
     except FileNotFoundError as e:
         render.console.print(f"[red]Error:[/red] {e}")
         sys.exit(1)
+
+    # Insights command — dispatch before standard flow
+    if args.command == "insights":
+        from .auth import resolve_credentials
+        from .insights import run_insights
+        from .render import render_insights, render_insights_progress
+
+        credentials = None
+        if not args.no_llm:
+            try:
+                credentials = resolve_credentials(args.provider, model=args.model)
+            except RuntimeError as e:
+                render.console.print(f"[yellow]Warning:[/] {e}")
+                render.console.print("Running in quantitative-only mode.")
+        since_ins, period_ins = _resolve_since(args)
+
+        def _on_progress(current: int, total: int) -> None:
+            render_insights_progress(current, total)
+
+        result = run_insights(
+            db,
+            since_ins,
+            None,
+            credentials=credentials,
+            no_llm=args.no_llm or credentials is None,
+            on_progress=_on_progress,
+        )
+        if args.json_output:
+            # JSON output handled by Task 11 — placeholder for now
+            import json as _json
+
+            print(_json.dumps({"period": period_ins, "quantitative": {}}, indent=2))
+        else:
+            render_insights(result, period_ins)
+        return
 
     since, period = _resolve_since(args)
     group_by = args.by or "day"
