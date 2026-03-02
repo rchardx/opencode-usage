@@ -290,3 +290,50 @@ class TestFetchRows:
         db = OpenCodeDB(db_path=_make_cli_db(tmp_path))
         rows = _fetch_rows(db, "unknown")
         assert rows == []
+
+
+# ── TestInsightsCli ───────────────────────────────────────────────────────────
+
+
+class TestInsightsCli:
+    def test_insights_parser_accepts_nollm(self):
+        """parse_args(['insights', '--no-llm']) sets no_llm=True."""
+        args = _build_parser().parse_args(["insights", "--no-llm"])
+        assert args.command == "insights"
+        assert args.no_llm is True
+
+    def test_insights_parser_accepts_since(self):
+        """parse_args(['insights', '--since', '7d']) parses since."""
+        args = _build_parser().parse_args(["insights", "--since", "7d"])
+        assert args.command == "insights"
+        assert args.since is not None
+
+    def test_insights_parser_accepts_provider(self):
+        """parse_args(['insights', '--provider', 'anthropic']) sets provider."""
+        args = _build_parser().parse_args(["insights", "--provider", "anthropic"])
+        assert args.provider == "anthropic"
+
+    def test_insights_parser_accepts_json(self):
+        """parse_args(['insights', '--json']) sets json_output=True."""
+        args = _build_parser().parse_args(["insights", "--json"])
+        assert args.json_output is True
+
+    def test_backwards_compat_today(self):
+        """parse_args(['today']) still works."""
+        args = _build_parser().parse_args(["today"])
+        assert args.command == "today"
+
+    def test_backwards_compat_by_model(self):
+        """parse_args(['--by', 'model']) still works."""
+        args = _build_parser().parse_args(["--by", "model"])
+        assert args.by == "model"
+
+    def test_default_provider_is_openai(self):
+        """Default provider is 'openai'."""
+        args = _build_parser().parse_args(["insights"])
+        assert args.provider == "openai"
+
+    def test_default_model_is_none(self):
+        """Default model is None (resolved from auth)."""
+        args = _build_parser().parse_args(["insights"])
+        assert args.model is None
