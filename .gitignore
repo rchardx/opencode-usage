@@ -23,3 +23,6 @@ env/
 .DS_Store
 Thumbs.db
 
+# Sisyphus working files
+.sisyphus/
+
