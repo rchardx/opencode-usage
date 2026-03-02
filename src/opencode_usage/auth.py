@@ -6,7 +6,7 @@ import json
 import os
 from pathlib import Path
 
-from .insights import Credentials
+from ._insights_legacy import Credentials
 
 
 def _default_auth_path() -> Path:

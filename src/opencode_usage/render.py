@@ -10,8 +10,8 @@ from rich.table import Table
 from rich.text import Text
 
 if TYPE_CHECKING:
+    from ._insights_legacy import InsightsResult
     from .db import UsageRow
-    from .insights import InsightsResult
 
 console = Console()
 

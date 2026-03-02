@@ -337,3 +337,59 @@ class TestInsightsCli:
         """Default model is None (resolved from auth)."""
         args = _build_parser().parse_args(["insights"])
         assert args.model is None
+
+
+# ── TestInsightsCommand ──────────────────────────────────────────
+
+
+class TestInsightsCommand:
+    def test_insights_command_accepted(self):
+        """parse_args(['insights']) succeeds and sets command."""
+
+        args = _build_parser().parse_args(["insights"])
+
+        assert args.command == "insights"
+
+    def test_force_flag_default_false(self):
+        """--force defaults to False."""
+
+        args = _build_parser().parse_args(["insights"])
+
+        assert args.force is False
+
+    def test_force_flag_set(self):
+        """--force sets to True."""
+
+        args = _build_parser().parse_args(["insights", "--force"])
+
+        assert args.force is True
+
+    def test_output_default(self):
+        """--output defaults to './opencode-insights.html'."""
+
+        args = _build_parser().parse_args(["insights"])
+
+        assert args.output == "./opencode-insights.html"
+
+    def test_output_custom(self):
+        """--output /tmp/report.html sets correctly."""
+
+        args = _build_parser().parse_args(["insights", "--output", "/tmp/report.html"])
+
+        assert args.output == "/tmp/report.html"
+
+    def test_model_default_none(self):
+        """--model defaults to None."""
+
+        args = _build_parser().parse_args(["insights"])
+
+        assert args.model is None
+
+    def test_insights_with_days(self):
+        """insights --days 30 parses correctly."""
+
+        args = _build_parser().parse_args(["insights", "--days", "30"])
+
+        assert args.command == "insights"
+
+        assert args.days == 30

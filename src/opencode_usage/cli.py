@@ -115,6 +115,19 @@ def _build_parser() -> argparse.ArgumentParser:
         help="LLM model to use for insights analysis",
     )
     p.add_argument(
+        "--force",
+        action="store_true",
+        dest="force",
+        help="Force re-analysis, ignoring cache",
+    )
+
+    p.add_argument(
+        "--output",
+        default="./opencode-insights.html",
+        metavar="PATH",
+        help="Output path for HTML report",
+    )
+    p.add_argument(
         "--db",
         default=None,
         metavar="PATH",
@@ -191,6 +204,12 @@ def _compute_deltas(
     return deltas
 
 
+def run_insights_new(args: argparse.Namespace) -> None:
+    """Stub for new HTML-based insights pipeline."""
+
+    render.console.print("[dim]Insights pipeline not yet implemented[/dim]")
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = _build_parser()
     args = parser.parse_args(argv)
@@ -206,8 +225,8 @@ def main(argv: list[str] | None = None) -> None:
 
     # Insights command — dispatch before standard flow
     if args.command == "insights":
+        from ._insights_legacy import run_insights
         from .auth import resolve_credentials
-        from .insights import run_insights
         from .render import render_insights, render_insights_progress
 
         credentials = None
@@ -231,7 +250,7 @@ def main(argv: list[str] | None = None) -> None:
             on_progress=_on_progress,
         )
         if args.json_output:
-            from .insights import insights_to_dict
+            from ._insights_legacy import insights_to_dict
 
             output = insights_to_dict(result)
             print(json.dumps(output, indent=2, ensure_ascii=False))

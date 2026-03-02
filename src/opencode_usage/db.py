@@ -10,7 +10,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from .insights import SessionMeta
+from ._insights_legacy import SessionMeta
 
 
 def _default_db_path() -> Path:

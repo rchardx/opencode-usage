@@ -5,7 +5,7 @@ import ssl
 import urllib.error
 import urllib.request
 
-from .insights import Credentials
+from ._insights_legacy import Credentials
 
 """Thin OpenAI-compatible HTTP client using stdlib urllib."""
 
