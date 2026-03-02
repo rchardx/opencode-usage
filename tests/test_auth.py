@@ -3,12 +3,17 @@
 from __future__ import annotations
 
 import json
+from unittest.mock import patch
 
 import pytest
 
 from opencode_usage.auth import list_providers, resolve_credentials
 
 # ── TestLoadCredentials ──────────────────────────────────────────────────────
+
+
+_MOCK_NO_CLI = patch("opencode_usage._opencode_cli._find_opencode", return_value=None)
+"""Patch ``_find_opencode`` so the XDG fallback is used instead of the real CLI."""
 
 
 class TestLoadCredentials:
@@ -23,7 +28,8 @@ class TestLoadCredentials:
         (oc_dir / "opencode.json").write_text(json.dumps(config))
         monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
         monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
-        creds = resolve_credentials("openai")
+        with _MOCK_NO_CLI:
+            creds = resolve_credentials("openai")
         assert creds.api_key == "sk-test-key"
         assert creds.base_url == "https://api.openai.com/v1"
 
@@ -36,7 +42,7 @@ class TestLoadCredentials:
         (oc_dir / "auth.json").write_text(json.dumps(auth))
         monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
         monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
-        with pytest.raises(RuntimeError, match="No API credentials"):
+        with _MOCK_NO_CLI, pytest.raises(RuntimeError, match="No API credentials"):
             resolve_credentials("github-copilot")
 
     def test_missing_auth_json(self, tmp_path, monkeypatch):
@@ -44,7 +50,7 @@ class TestLoadCredentials:
         monkeypatch.delenv("OPENAI_API_KEY", raising=False)
         monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
         monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
-        with pytest.raises(RuntimeError, match="Auth file not found"):
+        with _MOCK_NO_CLI, pytest.raises(RuntimeError, match="Auth file not found"):
             resolve_credentials("openai")
 
     def test_env_var_fallback(self, monkeypatch):
@@ -66,7 +72,8 @@ class TestLoadCredentials:
         oc_dir.mkdir()
         (oc_dir / "auth.json").write_text(json.dumps(auth))
         monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
-        providers = list_providers()
+        with _MOCK_NO_CLI:
+            providers = list_providers()
         assert "openai" in providers
         assert "anthropic" in providers
         assert "copilot" not in providers

@@ -4,21 +4,29 @@ from __future__ import annotations
 
 import json
 import os
+from dataclasses import dataclass
 from pathlib import Path
 
-from ._insights_legacy import Credentials
+from ._opencode_cli import get_auth_path, get_config_path
+
+
+@dataclass
+class Credentials:
+    """API credentials for insights service."""
+
+    api_key: str
+    base_url: str
+    model: str
 
 
 def _default_auth_path() -> Path:
     """Resolve the OpenCode auth.json path per platform."""
-    base = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share"))
-    return base / "opencode" / "auth.json"
+    return get_auth_path()
 
 
 def _default_config_path() -> Path:
     """Resolve the OpenCode opencode.json config path per platform."""
-    base = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
-    return base / "opencode" / "opencode.json"
+    return get_config_path()
 
 
 def resolve_credentials(provider: str = "openai", *, model: str | None = None) -> Credentials:

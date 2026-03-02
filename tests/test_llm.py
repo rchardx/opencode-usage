@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from opencode_usage.insights import Credentials
+from opencode_usage.auth import Credentials
 from opencode_usage.llm import chat_complete, chat_complete_json
 
 # ── TestLlmClient ────────────────────────────────────────────────────────────
