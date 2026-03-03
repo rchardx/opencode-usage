@@ -2,14 +2,12 @@
 
 from __future__ import annotations
 
-import opencode_usage.render as render_mod
 from opencode_usage.render import (
     _fmt_cost,
     _fmt_delta,
     _fmt_tokens,
     _short_model,
     _spark_bar,
-    configure_console,
 )
 
 # ── _fmt_tokens ──────────────────────────────────────────────
@@ -153,24 +151,3 @@ class TestFmtDelta:
     def test_small_negative(self):
         result = _fmt_delta(-1.0)
         assert "↓1%" in result
-
-
-# ── configure_console ────────────────────────────────────────
-
-
-class TestConfigureConsole:
-    def test_replaces_module_console_no_color(self):
-        original = render_mod.console
-        try:
-            configure_console(no_color=True)
-            assert render_mod.console is not original
-            assert render_mod.console.no_color is True
-        finally:
-            configure_console(no_color=False)
-
-    def test_replaces_module_console_color(self):
-        configure_console(no_color=True)
-        mid = render_mod.console
-        configure_console(no_color=False)
-        assert render_mod.console is not mid
-        assert render_mod.console.no_color is False

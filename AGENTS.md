@@ -204,7 +204,7 @@ docs: add PyPI installation instructions
 
 ## Key Patterns
 
-- **Console**: Module-level `console = Console()` in render.py, reconfigurable via `configure_console()`
+- **Console**: Module-level `console = Console()` in render.py; honors `NO_COLOR` env var automatically via Rich
 - **SQL**: Raw f-strings for dynamic GROUP BY/ORDER, parameterized `?` for user values
 - **Datetime**: Always timezone-aware (`datetime.now().astimezone()`), stored as milliseconds
 - **JSON output**: `round(cost, 4)`, `ensure_ascii=False`, `indent=2`

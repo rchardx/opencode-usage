@@ -73,16 +73,10 @@ class TestBuildParserRun:
         args = parser.parse_args(["run", "--compare"])
         assert args.compare is True
 
-    def test_no_color_flag(self):
-        parser = _build_parser()
-        args = parser.parse_args(["--no-color", "run"])
-        assert args.no_color is True
-
     def test_run_defaults(self):
         parser = _build_parser()
         args = parser.parse_args(["run"])
         assert args.subcommand == "run"
-        assert args.shortcut is None
         assert args.days is None
         assert args.since is None
         assert args.by is None
@@ -90,27 +84,11 @@ class TestBuildParserRun:
         assert args.json_output is False
         assert args.compare is False
 
-    def test_global_defaults(self):
-        parser = _build_parser()
-        args = parser.parse_args(["run"])
-        assert args.no_color is False
-        assert args.db is None
-
     def test_by_choices(self):
         parser = _build_parser()
         for choice in ("model", "agent", "provider", "session", "day"):
             args = parser.parse_args(["run", "--by", choice])
             assert args.by == choice
-
-    def test_shortcut_today(self):
-        parser = _build_parser()
-        args = parser.parse_args(["run", "today"])
-        assert args.shortcut == "today"
-
-    def test_shortcut_yesterday(self):
-        parser = _build_parser()
-        args = parser.parse_args(["run", "yesterday"])
-        assert args.shortcut == "yesterday"
 
     def test_json_flag(self):
         parser = _build_parser()
@@ -126,11 +104,6 @@ class TestBuildParserRun:
         parser = _build_parser()
         args = parser.parse_args(["run", "--days", "30"])
         assert args.days == 30
-
-    def test_db_global(self):
-        parser = _build_parser()
-        args = parser.parse_args(["--db", "/tmp/test.db", "run"])
-        assert args.db == "/tmp/test.db"
 
 
 # ── _build_parser (insights subcommand) ─────────────────────
@@ -179,22 +152,12 @@ class TestBuildParserInsights:
         assert args.subcommand == "insights"
         assert args.days == 30
 
-    def test_db_global_with_insights(self):
-        args = _build_parser().parse_args(["--db", "/tmp/test.db", "insights"])
-        assert args.db == "/tmp/test.db"
-        assert args.subcommand == "insights"
-
 
 # ── backward compatibility (main routing) ───────────────────
 
 
 class TestBackwardCompat:
     """Verify that bare arguments without 'run' prefix still work via main()."""
-
-    def test_bare_today(self):
-        parser = _build_parser()
-        args = parser.parse_args(["run", "today"])
-        assert args.shortcut == "today"
 
     def test_bare_by_model(self):
         parser = _build_parser()
@@ -211,24 +174,8 @@ class TestBackwardCompat:
 
 
 class TestResolveSince:
-    def test_today(self):
-        ns = argparse.Namespace(shortcut="today", since=None, days=None)
-        since, period = _resolve_since(ns)
-        now = datetime.now().astimezone()
-        assert since.date() == now.date()
-        assert since.hour == 0
-        assert since.minute == 0
-        assert period == "Today"
-
-    def test_yesterday(self):
-        ns = argparse.Namespace(shortcut="yesterday", since=None, days=None)
-        since, period = _resolve_since(ns)
-        yesterday = datetime.now().astimezone() - timedelta(days=1)
-        assert since.date() == yesterday.date()
-        assert period == "Yesterday & Today"
-
     def test_days_flag(self):
-        ns = argparse.Namespace(shortcut=None, since=None, days=14)
+        ns = argparse.Namespace(since=None, days=14)
         since, period = _resolve_since(ns)
         expected = datetime.now().astimezone() - timedelta(days=14)
         assert abs((since - expected).total_seconds()) < 2
@@ -236,23 +183,17 @@ class TestResolveSince:
 
     def test_since_flag(self):
         dt = datetime(2025, 1, 15).astimezone()
-        ns = argparse.Namespace(shortcut=None, since=dt, days=None)
+        ns = argparse.Namespace(since=dt, days=None)
         since, period = _resolve_since(ns)
         assert since == dt
         assert "2025-01-15" in period
 
     def test_default_seven_days(self):
-        ns = argparse.Namespace(shortcut=None, since=None, days=None)
+        ns = argparse.Namespace(since=None, days=None)
         since, period = _resolve_since(ns)
         expected = datetime.now().astimezone() - timedelta(days=7)
         assert abs((since - expected).total_seconds()) < 2
         assert period == "Last 7 days"
-
-    def test_no_shortcut_attr(self):
-        ns = argparse.Namespace(since=None, days=None)
-        since, _period = _resolve_since(ns)
-        expected = datetime.now().astimezone() - timedelta(days=7)
-        assert abs((since - expected).total_seconds()) < 2
 
 
 # ── _compute_deltas ──────────────────────────────────────────

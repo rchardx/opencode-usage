@@ -20,9 +20,7 @@ def _make_args(**kwargs: object) -> argparse.Namespace:
         "since": None,
         "force": False,
         "output": "/tmp/test-insights.html",
-        "db": None,
         "command": "insights",
-        "no_color": False,
     }
     defaults.update(kwargs)
     return argparse.Namespace(**defaults)

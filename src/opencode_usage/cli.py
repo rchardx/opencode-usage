@@ -11,7 +11,7 @@ from typing import Any
 
 from . import render
 from .db import OpenCodeDB, UsageRow
-from .render import configure_console, render_daily, render_grouped, render_summary
+from .render import render_daily, render_grouped, render_summary
 
 
 def _parse_since(value: str) -> datetime:
@@ -40,9 +40,6 @@ def _parse_since(value: str) -> datetime:
     )
 
 
-_RUN_SHORTCUTS = ("today", "yesterday")
-
-
 def _add_time_args(parser: argparse.ArgumentParser) -> None:
     """Add --days and --since to *parser* (shared by run & insights)."""
     parser.add_argument(
@@ -67,30 +64,10 @@ def _build_parser() -> argparse.ArgumentParser:
         description="Track and display OpenCode token usage statistics.",
     )
 
-    p.add_argument(
-        "--db",
-        default=None,
-        metavar="PATH",
-        help="Path to OpenCode database (default: auto-detect)",
-    )
-    p.add_argument(
-        "--no-color",
-        action="store_true",
-        dest="no_color",
-        help="Disable colored output",
-    )
-
     sub = p.add_subparsers(dest="subcommand")
 
     # ── run ──────────────────────────────────────────────────
     run_p = sub.add_parser("run", help="Token usage statistics (default)")
-    run_p.add_argument(
-        "shortcut",
-        nargs="?",
-        default=None,
-        choices=list(_RUN_SHORTCUTS),
-        help="Quick shortcut: 'today' or 'yesterday'",
-    )
     _add_time_args(run_p)
     run_p.add_argument(
         "--by",
@@ -152,17 +129,6 @@ def _resolve_since(args: argparse.Namespace) -> tuple[datetime | None, str]:
     """Resolve the effective 'since' datetime and a human-readable period label."""
     now = datetime.now().astimezone()
 
-    shortcut = getattr(args, "shortcut", None)
-
-    if shortcut == "today":
-        since = now.replace(hour=0, minute=0, second=0, microsecond=0)
-        return since, "Today"
-
-    if shortcut == "yesterday":
-        yesterday = now - timedelta(days=1)
-        since = yesterday.replace(hour=0, minute=0, second=0, microsecond=0)
-        return since, "Yesterday & Today"
-
     if args.since is not None:
         return args.since, f"Since {args.since.strftime('%Y-%m-%d')}"
 
@@ -220,7 +186,7 @@ def _compute_deltas(
 def _cmd_run(args: argparse.Namespace) -> None:
     """Execute the ``run`` subcommand."""
     try:
-        db = OpenCodeDB(db_path=args.db)
+        db = OpenCodeDB()
     except FileNotFoundError as e:
         render.console.print(f"[red]Error:[/red] {e}")
         sys.exit(1)
@@ -280,22 +246,14 @@ def _cmd_insights(args: argparse.Namespace) -> None:
     run_insights(args)
 
 
-def _is_run_shortcut(token: str) -> bool:
-    """Return True if *token* looks like a bare ``run`` shortcut (today/yesterday)."""
-    return token in _RUN_SHORTCUTS
-
-
 def main(argv: list[str] | None = None) -> None:
     parser = _build_parser()
     raw = argv if argv is not None else sys.argv[1:]
 
-    if not raw or (raw[0] not in ("run", "insights") and not raw[0].startswith("-")):
+    if not raw or raw[0] not in ("run", "insights", "-h", "--help"):
         raw = ["run", *raw]
 
     args = parser.parse_args(raw)
-
-    if args.no_color:
-        configure_console(no_color=True)
 
     if args.subcommand == "insights":
         _cmd_insights(args)

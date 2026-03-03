@@ -38,10 +38,6 @@ After installation, `opencode-usage` is available globally.
 # Default: last 7 days, daily breakdown
 opencode-usage
 
-# Quick shortcuts
-opencode-usage today
-opencode-usage yesterday
-
 # Time filtering
 opencode-usage --days 30
 opencode-usage --since 7d
@@ -86,6 +82,7 @@ opencode-usage --by model --json | jq '.rows[].label'
 | Environment Variable | Description |
 |---|---|
 | `OPENCODE_DB` | Override database path (default: auto-detected per platform) |
+| `NO_COLOR` | Disable colored output when set (see [no-color.org](https://no-color.org)) |
 
 Default database locations:
 
