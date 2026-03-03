@@ -9,7 +9,7 @@ import sys
 from datetime import datetime, timedelta
 from typing import Any
 
-from . import render
+from . import __version__, render
 from .db import OpenCodeDB, UsageRow
 from .render import render_daily, render_grouped, render_summary
 
@@ -63,6 +63,7 @@ def _build_parser() -> argparse.ArgumentParser:
         prog="opencode-usage",
         description="Track and display OpenCode token usage statistics.",
     )
+    p.add_argument("-V", "--version", action="version", version=f"%(prog)s {__version__}")
 
     sub = p.add_subparsers(dest="subcommand")
 
@@ -250,7 +251,7 @@ def main(argv: list[str] | None = None) -> None:
     parser = _build_parser()
     raw = argv if argv is not None else sys.argv[1:]
 
-    if not raw or raw[0] not in ("run", "insights", "-h", "--help"):
+    if not raw or raw[0] not in ("run", "insights", "-h", "--help", "-V", "--version"):
         raw = ["run", *raw]
 
     args = parser.parse_args(raw)
