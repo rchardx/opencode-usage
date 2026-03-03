@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.2.3](https://github.com/rchardx/opencode-usage/compare/v0.2.2...v0.2.3) (2026-03-03)
+
+
+### Features
+
+* **cli:** add --version / -V flag ([a1273dd](https://github.com/rchardx/opencode-usage/commit/a1273dd5f480b16490c0c737ef495528bfd7d54f))
+
+
+### Code Refactoring
+
+* **cli:** remove global flags and shortcuts, default to run subcommand ([11d0368](https://github.com/rchardx/opencode-usage/commit/11d0368d7d10bdebedaa286ac342a3c59c6a4ae1))
+
 ## [0.2.2](https://github.com/rchardx/opencode-usage/compare/v0.2.1...v0.2.2) (2026-03-02)
 
 
