@@ -11,7 +11,7 @@ import warnings
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from .cache import FacetCache
 from .extract import extract_session_meta, reconstruct_transcript
@@ -62,12 +62,12 @@ def parse_ndjson(output: str) -> tuple[str, float, dict[str, int]]:
             cost = float(part.get("cost", 0.0))
             raw_tokens = part.get("tokens", {})
             if isinstance(raw_tokens, dict):
-                tokens = {k: int(v) for k, v in raw_tokens.items() if isinstance(v, (int, float))}
+                tokens = {k: int(v) for k, v in raw_tokens.items() if isinstance(v, int | float)}
 
     return "".join(text_parts), cost, tokens
 
 
-def extract_json_from_response(text: str) -> dict:
+def extract_json_from_response(text: str) -> dict[str, Any]:
     """Strip markdown code fences and parse JSON from LLM response text."""
     stripped = text.strip()
 
@@ -101,7 +101,7 @@ def run_llm(
     prompt: str,
     model: str = "opencode/minimax-m2.5-free",
     timeout: int = 120,
-) -> dict:
+) -> dict[str, Any]:
     """Run opencode LLM analysis via subprocess and return parsed JSON result.
 
     Retries up to 3 times on timeout with exponential backoff.
@@ -305,7 +305,7 @@ def run_aggregate_analysis(
     facets: dict[str, SessionFacet],
     stats: AggregatedStats,
     config: InsightsConfig,
-) -> dict[str, dict]:
+) -> dict[str, dict[str, Any]]:
     """Run 7 aggregate LLM prompts and return results."""
     aggregated_data = {
         "session_count": stats.total_sessions,
@@ -331,10 +331,10 @@ def run_aggregate_analysis(
         ("horizon", build_horizon_prompt),
     ]
 
-    results: dict[str, dict] = {}
+    results: dict[str, dict[str, Any]] = {}
     workers = min(_default_concurrency(config.concurrency), len(prompts))
 
-    def _run_prompt(key: str, builder) -> tuple[str, dict]:
+    def _run_prompt(key: str, builder) -> tuple[str, dict[str, Any]]:
         try:
             prompt_text = builder(aggregated_data)
             return key, run_llm(prompt_text, model=config.model)
@@ -351,10 +351,10 @@ def run_aggregate_analysis(
 
 
 def generate_at_a_glance(
-    aggregate_results: dict[str, dict],
+    aggregate_results: dict[str, dict[str, Any]],
     stats: AggregatedStats,
     config: InsightsConfig,
-) -> dict:
+) -> dict[str, Any]:
     """Synthesize all insights into an at-a-glance summary."""
     stats_summary = {
         "total_sessions": stats.total_sessions,

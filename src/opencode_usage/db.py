@@ -123,7 +123,8 @@ class OpenCodeDB:
             ORDER BY {order}
         """
         if limit:
-            sql += f" LIMIT {limit}"
+            sql += " LIMIT ?"
+            params.append(limit)
 
         conn = self._connect()
         try:
@@ -208,7 +209,8 @@ class OpenCodeDB:
             ORDER BY agent, total_tokens DESC
         """
         if limit:
-            sql += f" LIMIT {limit}"
+            sql += " LIMIT ?"
+            params.append(limit)
 
         conn = self._connect()
         try:
@@ -276,7 +278,8 @@ class OpenCodeDB:
             ORDER BY total_tokens DESC
         """
         if limit:
-            sql += f" LIMIT {limit}"
+            sql += " LIMIT ?"
+            params.append(limit)
 
         conn = self._connect()
         try:
@@ -369,7 +372,8 @@ class OpenCodeDB:
             ORDER BY total_tokens DESC
         """
         if limit:
-            sql += f" LIMIT {limit}"
+            sql += " LIMIT ?"
+            params.append(limit)
 
         conn = self._connect()
         try:
@@ -478,11 +482,7 @@ class OpenCodeDB:
                 result[model] = r["total_cost"] / total_tokens * 1000
         return result
 
-    def tool_error_rates(
-        self,
-        since: datetime | None = None,
-        until: datetime | None = None,
-    ) -> dict[str, float]:
+    def tool_error_rates(self) -> dict[str, float]:
         """Per-tool error rate from the part table."""
         sql = """
             SELECT
@@ -510,11 +510,7 @@ class OpenCodeDB:
                 result[tool_name] = r["error_count"] / total_calls
         return result
 
-    def agent_delegation(
-        self,
-        since: datetime | None = None,
-        until: datetime | None = None,
-    ) -> dict[str, list[str]]:
+    def agent_delegation(self) -> dict[str, list[str]]:
         """Map parent session agents to their sub-agents."""
         sql = """
             SELECT

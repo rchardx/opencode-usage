@@ -56,7 +56,13 @@ def chat_complete(
 
     try:
         result = json.loads(response.read().decode())
-        return result["choices"][0]["message"]["content"]
+        # Defensive checks for malformed responses
+        if "choices" not in result or not result["choices"]:
+            raise RuntimeError("LLM returned empty choices array")
+        choice = result["choices"][0]
+        if "message" not in choice or "content" not in choice["message"]:
+            raise RuntimeError("LLM returned malformed response structure")
+        return choice["message"]["content"]
     finally:
         response.close()
 
