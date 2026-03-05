@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.5](https://github.com/rchardx/opencode-usage/compare/v0.2.4...v0.2.5) (2026-03-05)
+
+
+### Bug Fixes
+
+* **db,llm:** improve code quality and safety ([b42fffa](https://github.com/rchardx/opencode-usage/commit/b42fffa799be585ee13744bd67f2cb39ba920a09))
+
 ## [0.2.4](https://github.com/rchardx/opencode-usage/compare/v0.2.3...v0.2.4) (2026-03-05)
 
 
