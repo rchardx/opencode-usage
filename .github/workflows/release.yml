@@ -21,6 +21,31 @@ jobs:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
 
+      # Keep uv.lock in sync after release-please bumps pyproject.toml
+      - uses: actions/checkout@v4
+        if: ${{ !steps.release.outputs.release_created }}
+        with:
+          ref: release-please--branches--main
+        id: checkout-pr
+        continue-on-error: true
+
+      - uses: astral-sh/setup-uv@v6
+        if: ${{ steps.checkout-pr.outcome == 'success' }}
+
+      - name: Sync uv.lock
+        if: ${{ steps.checkout-pr.outcome == 'success' }}
+        run: |
+          uv sync
+          if git diff --quiet uv.lock; then
+            echo "uv.lock already in sync"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add uv.lock
+          git commit -m "chore: sync uv.lock"
+          git push
+
   publish:
     needs: release-please
     if: ${{ needs.release-please.outputs.release_created }}

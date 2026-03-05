@@ -146,7 +146,7 @@ uvx ruff format .
 ## CI Pipelines
 
 - **CI** (`.github/workflows/ci.yml`): Runs on push/PR to main. Lint with ruff, test on Python 3.10/3.12/3.13.
-- **Release** (`.github/workflows/release.yml`): Triggered by `v*` tags. Builds, publishes to PyPI, creates GitHub Release.
+- **Release** (`.github/workflows/release.yml`): Runs on push to main. Release-please manages version PRs and auto-syncs `uv.lock`; on merge, publishes to PyPI and creates GitHub Release.
 
 ## Code Style
 
