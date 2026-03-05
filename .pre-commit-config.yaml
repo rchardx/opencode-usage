@@ -1,7 +1,66 @@
 repos:
+  # ── Python Linting & Formatting ──────────────────────────────
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.11.12
     hooks:
       - id: ruff
         args: [--fix, --exit-non-zero-on-fix]
       - id: ruff-format
+
+  # ── Type Checking (errors only) ──────────────────────────────────
+  - repo: local
+    hooks:
+      - id: basedpyright
+        name: basedpyright (errors only)
+        entry: uvx basedpyright --level error
+        language: system
+        types: [python]
+        files: ^src/
+        pass_filenames: false
+        args: [src/]
+
+  # ── Security Checks ───────────────────────────────────────────
+  - repo: https://github.com/PyCQA/bandit
+    rev: 1.7.10
+    hooks:
+      - id: bandit
+        args: [-c, pyproject.toml]
+        additional_dependencies: ["bandit[toml]"]
+        files: ^src/
+
+  # ── General Quality Checks ────────────────────────────────────
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      # File hygiene
+      - id: trailing-whitespace
+        args: [--markdown-linebreak-ext=md]
+      - id: end-of-file-fixer
+      - id: check-yaml
+        args: [--unsafe]
+      - id: check-json
+      - id: check-toml
+
+      # Prevent mistakes
+      - id: check-merge-conflict
+      - id: check-case-conflict
+      - id: check-added-large-files
+        args: [--maxkb=500]
+      - id: check-executables-have-shebangs
+      - id: check-shebang-scripts-are-executable
+
+      # Security
+      - id: detect-private-key
+      - id: debug-statements
+
+  # ── Commit Message Linting ────────────────────────────────────
+  - repo: https://github.com/commitizen-tools/commitizen
+    rev: v4.6.0
+    hooks:
+      - id: commitizen
+        stages: [commit-msg]
+
+# ── Configuration ───────────────────────────────────────────────
+ci:
+  autofix_prs: true
+  autoupdate_schedule: weekly

@@ -1,48 +1,56 @@
-[project]
-name = "opencode-usage"
-version = "0.2.4"
-description = "CLI tool to track and display OpenCode token usage statistics"
-readme = "README.md"
-requires-python = ">=3.10"
-license = "MIT"
-dependencies = [
-    "rich>=13.0",
-]
+[build-system]
+build-backend = "hatchling.build"
+requires = ["hatchling"]
 
 [dependency-groups]
 dev = ["pytest>=7.0"]
 
+[project]
+dependencies = [
+  "rich>=13.0"
+]
+description = "CLI tool to track and display OpenCode token usage statistics"
+license = "MIT"
+name = "opencode-usage"
+readme = "README.md"
+requires-python = ">=3.10"
+version = "0.2.4"
+
 [project.scripts]
 opencode-usage = "opencode_usage.cli:main"
 
-[build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
-
-[tool.hatch.build.targets.wheel]
-packages = ["src/opencode_usage"]
+[tool.commitizen]
+major_version_zero = true
+name = "cz_conventional_commits"
+tag_format = "$version"
+update_changelog_on_bump = true
+version_provider = "pep621"
+version_scheme = "pep440"
 
 [tool.hatch.build.targets.sdist]
 include = ["src/opencode_usage"]
 
+[tool.hatch.build.targets.wheel]
+packages = ["src/opencode_usage"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
 [tool.ruff]
-target-version = "py310"
 line-length = 100
+target-version = "py310"
 
 [tool.ruff.lint]
 select = [
-    "E",    # pycodestyle errors
-    "W",    # pycodestyle warnings
-    "F",    # pyflakes
-    "I",    # isort
-    "UP",   # pyupgrade
-    "B",    # flake8-bugbear
-    "SIM",  # flake8-simplify
-    "RUF",  # ruff-specific
+  "E",  # pycodestyle errors
+  "W",  # pycodestyle warnings
+  "F",  # pyflakes
+  "I",  # isort
+  "UP",  # pyupgrade
+  "B",  # flake8-bugbear
+  "SIM",  # flake8-simplify
+  "RUF"  # ruff-specific
 ]
 
 [tool.ruff.lint.isort]
 known-first-party = ["opencode_usage"]
-
-[tool.pytest.ini_options]
-testpaths = ["tests"]
