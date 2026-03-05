@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.4](https://github.com/rchardx/opencode-usage/compare/v0.2.3...v0.2.4) (2026-03-05)
+
+
+### Documentation
+
+* **readme:** add run/insights subcommands and LLM configuration ([27b23a0](https://github.com/rchardx/opencode-usage/commit/27b23a0af865c0c5a41735ff6f2cc46fbc66b563))
+* rewrite AGENTS.md with full module inventory, subcommands, and insights architecture ([6958933](https://github.com/rchardx/opencode-usage/commit/69589332e563e99294a4aa2c9ecccdcd4331b28e))
+
 ## [0.2.3](https://github.com/rchardx/opencode-usage/compare/v0.2.2...v0.2.3) (2026-03-03)
 
 
