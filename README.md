@@ -1,6 +1,6 @@
 # opencode-usage
 
-CLI tool to track and display [OpenCode](https://github.com/opencodeco/opencode) token usage statistics. Reads directly from OpenCode's local SQLite database — no API keys or external services needed.
+CLI tool to track and display [OpenCode](https://github.com/opencodeco/opencode) token usage statistics. Reads directly from OpenCode's local SQLite database — no API keys or external services needed for basic usage.
 
 ## Features
 
@@ -8,7 +8,9 @@ CLI tool to track and display [OpenCode](https://github.com/opencodeco/opencode)
 - **Group by dimension** — model, agent, provider, or session
 - **Agent × Model view** — see which model each agent uses
 - **Time filtering** — last N days, relative durations (`7d`, `2w`), or ISO dates
+- **Period comparison** — compare current vs previous period with `--compare`
 - **JSON output** — pipe to `jq` or other tools
+- **LLM-powered insights** — analyze session transcripts and generate a self-contained HTML report
 - **Cross-platform** — macOS, Linux, Windows
 
 ## Installation
@@ -34,25 +36,52 @@ After installation, `opencode-usage` is available globally.
 
 ## Usage
 
+The CLI has two subcommands: `run` (default) and `insights`.
+
+### `run` — Token usage statistics
+
 ```bash
 # Default: last 7 days, daily breakdown
 opencode-usage
 
 # Time filtering
-opencode-usage --days 30
-opencode-usage --since 7d
-opencode-usage --since 2025-01-01
+opencode-usage run --days 30
+opencode-usage run --since 7d
+opencode-usage run --since 2025-01-01
 
 # Group by dimension
-opencode-usage --by model
-opencode-usage --by agent          # shows model per agent
-opencode-usage --by provider
-opencode-usage --by session --limit 10
+opencode-usage run --by model
+opencode-usage run --by agent          # shows model per agent
+opencode-usage run --by provider
+opencode-usage run --by session --limit 10
 
 # JSON output
-opencode-usage --json
-opencode-usage --by model --json | jq '.rows[].label'
+opencode-usage run --json
+opencode-usage run --by model --json | jq '.rows[].label'
+
+# Compare with previous period
+opencode-usage run --since 7d --compare
 ```
+
+### `insights` — LLM-powered analysis
+
+Analyze your OpenCode sessions and generate an HTML report with workflow insights, friction patterns, agent performance, and actionable suggestions.
+
+```bash
+# Interactive model picker
+opencode-usage insights
+
+# Specific model
+opencode-usage insights --model gpt-4o-mini
+
+# Customize analysis
+opencode-usage insights --days 30 --concurrency 4 --output report.html
+
+# Force re-analysis (ignore cache)
+opencode-usage insights --force
+```
+
+Requires an API key for the LLM provider — set via environment variable (e.g. `OPENAI_API_KEY`) or OpenCode's `auth.json`.
 
 ### Example output
 
@@ -83,6 +112,8 @@ opencode-usage --by model --json | jq '.rows[].label'
 |---|---|
 | `OPENCODE_DB` | Override database path (default: auto-detected per platform) |
 | `NO_COLOR` | Disable colored output when set (see [no-color.org](https://no-color.org)) |
+| `{PROVIDER}_API_KEY` | API key for insights LLM provider (e.g. `OPENAI_API_KEY`) |
+| `{PROVIDER}_BASE_URL` | Base URL override for insights LLM provider |
 
 Default database locations:
 
