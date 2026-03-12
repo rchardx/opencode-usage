@@ -14,7 +14,7 @@ license = "MIT"
 name = "opencode-usage"
 readme = "README.md"
 requires-python = ">=3.10"
-version = "0.2.4"
+version = "0.2.5"
 
 [project.scripts]
 opencode-usage = "opencode_usage.cli:main"
