@@ -10,8 +10,86 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from . import __version__, render
+from .config import Config
+from .config import load as load_config
 from .db import OpenCodeDB, UsageRow
 from .render import render_daily, render_grouped, render_summary
+
+_MAIN_EPILOG = """
+Configuration:
+  Values are read from ~/.config/opencode-usage/config.toml
+  (or $XDG_CONFIG_HOME/opencode-usage/config.toml). CLI flags always win
+  over config values, which win over built-in defaults.
+
+    [defaults]
+    days = 7          # or weeks / months
+    by = "day"        # minute, hour, day, week, month, model, agent,
+                      # provider, session
+    sort = "tokens"   # tokens, cost, calls
+
+    [insights]
+    preferred_models = ["opencode-go/kimi-k3"]
+                      # ordered list shown first in the interactive picker
+
+Environment:
+  OPENCODE_DB          override the database path (same as --db)
+
+Commands:
+  run       token usage statistics (default)
+  insights  LLM-powered usage analysis report
+  providers list provider IDs (from 'opencode models')
+  models    list model IDs (from 'opencode models')
+  help      show help for a command
+
+Examples:
+  opencode-usage                             last 7 days, daily breakdown
+  opencode-usage --days 30 --by model
+  opencode-usage --weeks 2 --by month
+  opencode-usage --months 3 --by week
+  opencode-usage --since 3h --by hour
+  opencode-usage --provider kimi-for-coding --by model --sort cost
+  opencode-usage --model k3 --agent build --csv
+  opencode-usage --compare --by model
+  opencode-usage insights --no-llm
+  opencode-usage help run
+"""
+
+_RUN_EPILOG = """
+Time filtering:
+  --since, --days, --weeks and --months are alternatives; the first one
+  given wins in that order. --since accepts durations (7d, 2w, 30d, 3h,
+  12m) or an ISO date (2026-08-01).
+
+Grouping (--by):
+  minute    per-minute buckets            hour      per-hour buckets
+  day       per-day buckets (default)     week      per-week buckets (2026-W31)
+  month     per-month buckets             model     per model
+  agent     per agent, one row per agent x model
+  provider  per provider                  session   per session (by title)
+
+Filters (repeatable):
+  --provider / --model / --agent keep only matching rows; --exclude-provider
+  removes them. Matching is exact on the providerID / modelID / agent fields.
+
+Output:
+  --sort orders grouped rows by tokens (default), cost, or calls.
+  --json emits machine-readable JSON, including run_rate_monthly.
+  --csv emits rows as CSV; mutually exclusive with --json.
+  The summary panel includes an "approx $X/mo" run-rate projection.
+  --compare adds deltas against the previous period of the same length.
+"""
+
+_INSIGHTS_EPILOG = """
+  Generates a self-contained HTML report. Sessions are analyzed with an
+  LLM through the opencode CLI unless --no-llm is given.
+
+  --model selects the analysis model (provider/model). When omitted, an
+  interactive picker shows the models from [insights] preferred_models in
+  the config file first, then the recommended list.
+  --force clears the per-facet cache and re-analyzes everything.
+  --concurrency caps parallel LLM workers (default: min(cpu_count, 8)).
+  --no-llm skips all LLM calls and produces a data-only report.
+"""
 
 
 def _parse_since(value: str) -> datetime:
@@ -61,14 +139,24 @@ def _add_time_args(parser: argparse.ArgumentParser) -> None:
 def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="opencode-usage",
-        description="Track and display OpenCode token usage statistics.",
+        description=(
+            "Track and display OpenCode token usage statistics, read directly "
+            "from OpenCode's local SQLite database."
+        ),
+        epilog=_MAIN_EPILOG,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     p.add_argument("-V", "--version", action="version", version=f"%(prog)s {__version__}")
 
-    sub = p.add_subparsers(dest="subcommand")
+    sub = p.add_subparsers(dest="subcommand", metavar="COMMAND")
 
     # ── run ──────────────────────────────────────────────────
-    run_p = sub.add_parser("run", help="Token usage statistics (default)")
+    run_p = sub.add_parser(
+        "run",
+        help="Token usage statistics (default)",
+        epilog=_RUN_EPILOG,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     _add_time_args(run_p)
     run_p.add_argument(
         "--by",
@@ -96,7 +184,12 @@ def _build_parser() -> argparse.ArgumentParser:
     )
 
     # ── insights ────────────────────────────────────────────
-    ins_p = sub.add_parser("insights", help="LLM-powered usage analysis report")
+    ins_p = sub.add_parser(
+        "insights",
+        help="LLM-powered usage analysis report",
+        epilog=_INSIGHTS_EPILOG,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     _add_time_args(ins_p)
     ins_p.add_argument(
         "--model",
@@ -121,6 +214,59 @@ def _build_parser() -> argparse.ArgumentParser:
         default="./opencode-insights.html",
         metavar="PATH",
         help="Output path for HTML report",
+    )
+
+    # ── help ────────────────────────────────────────────────
+    help_p = sub.add_parser("help", help="Show help for a command")
+    help_p.add_argument(
+        "command",
+        nargs="?",
+        choices=("run", "insights", "providers", "models"),
+        help="Command to show help for (omit for general help)",
+    )
+
+    # ── providers ───────────────────────────────────────────
+    prov_p = sub.add_parser(
+        "providers",
+        help="List provider IDs (from 'opencode models')",
+        description=(
+            "List provider IDs usable with --provider / --exclude-provider. "
+            "Providers marked with '*' have credentials in opencode's auth.json."
+        ),
+    )
+    prov_p.add_argument(
+        "--json",
+        action="store_true",
+        dest="json_output",
+        help="Output as JSON",
+    )
+
+    # ── models ──────────────────────────────────────────────
+    mod_p = sub.add_parser(
+        "models",
+        help="List model IDs (from 'opencode models')",
+        description=(
+            "List provider/model IDs usable with --model / --provider. "
+            "Use --id to show the bare model ID as stored in the database."
+        ),
+    )
+    mod_p.add_argument(
+        "--provider",
+        action="append",
+        default=None,
+        metavar="ID",
+        help="Only list models of this provider (repeatable)",
+    )
+    mod_p.add_argument(
+        "--id",
+        action="store_true",
+        help="Show only the model ID, without the provider prefix",
+    )
+    mod_p.add_argument(
+        "--json",
+        action="store_true",
+        dest="json_output",
+        help="Output as JSON",
     )
 
     return p
@@ -184,7 +330,19 @@ def _compute_deltas(
     return deltas
 
 
-def _cmd_run(args: argparse.Namespace) -> None:
+def _apply_config_defaults(args: argparse.Namespace, cfg: Config) -> None:
+    """Fill config defaults into *args* where no CLI flag was given."""
+    if args.since is None and all(
+        getattr(args, attr, None) is None for attr in ("days", "weeks", "months")
+    ):
+        for attr in ("days", "weeks", "months"):
+            value = getattr(cfg, attr, None)
+            if value is not None:
+                setattr(args, attr, value)
+                break
+
+
+def _cmd_run(args: argparse.Namespace, cfg: Config) -> None:
     """Execute the ``run`` subcommand."""
     try:
         db = OpenCodeDB()
@@ -192,8 +350,9 @@ def _cmd_run(args: argparse.Namespace) -> None:
         render.console.print(f"[red]Error:[/red] {e}")
         sys.exit(1)
 
+    _apply_config_defaults(args, cfg)
     since, period = _resolve_since(args)
-    group_by = args.by or "day"
+    group_by = args.by or cfg.by or "day"
 
     now = datetime.now().astimezone()
     prev_since = None
@@ -235,28 +394,113 @@ def _cmd_run(args: argparse.Namespace) -> None:
         render_grouped(rows, group_by, period, deltas=deltas)
 
 
-def _cmd_insights(args: argparse.Namespace) -> None:
+def _cmd_insights(args: argparse.Namespace, cfg: Config) -> None:
     """Execute the ``insights`` subcommand."""
+    _apply_config_defaults(args, cfg)
     if args.model is None:
         from .models import select_model_interactive
 
-        args.model = select_model_interactive(render.console)
+        args.model = select_model_interactive(render.console, cfg)
 
     from .insights.orchestrator import run_insights
 
     run_insights(args)
 
 
+def _cmd_help(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
+    """Show help for *args.command*, or the general help when omitted."""
+    if args.command:
+        _build_parser().parse_args([args.command, "--help"])
+    parser.print_help()
+
+
+def _list_opencode_models() -> list[str]:
+    """Return ``opencode models`` output, exiting with an error if unavailable."""
+    from ._opencode_cli import run_models
+
+    models = run_models()
+    if not models:
+        render.console.print(
+            "[red]Error:[/red] Could not list models — is [bold]opencode[/bold] installed?"
+        )
+        sys.exit(1)
+    return models
+
+
+def _cmd_providers(args: argparse.Namespace) -> None:
+    """Execute the ``providers`` subcommand."""
+    import json as _json
+
+    from ._opencode_cli import get_auth_path
+
+    models = _list_opencode_models()
+    providers = sorted({m.split("/", 1)[0] for m in models if "/" in m})
+
+    connected: set[str] = set()
+    try:
+        with open(get_auth_path()) as f:
+            connected = set(_json.load(f).keys())
+    except (OSError, ValueError):
+        pass
+
+    if args.json_output:
+        print(_json.dumps(providers, indent=2))
+        return
+
+    for provider in providers:
+        mark = "*" if provider in connected else " "
+        print(f"{mark} {provider}")
+    if connected:
+        render.console.print()
+        render.console.print("[dim]* = connected (credentials present)[/dim]")
+
+
+def _cmd_models(args: argparse.Namespace) -> None:
+    """Execute the ``models`` subcommand."""
+    import json as _json
+
+    models = _list_opencode_models()
+
+    if args.provider:
+        wanted = set(args.provider)
+        models = [m for m in models if m.split("/", 1)[0] in wanted]
+    models = sorted(models)
+
+    if args.json_output:
+        print(_json.dumps([m.split("/", 1)[1] if args.id else m for m in models], indent=2))
+        return
+
+    for m in models:
+        print(m.split("/", 1)[1] if args.id else m)
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = _build_parser()
     raw = argv if argv is not None else sys.argv[1:]
 
-    if not raw or raw[0] not in ("run", "insights", "-h", "--help", "-V", "--version"):
+    if not raw or raw[0] not in (
+        "run",
+        "insights",
+        "help",
+        "providers",
+        "models",
+        "-h",
+        "--help",
+        "-V",
+        "--version",
+    ):
         raw = ["run", *raw]
 
     args = parser.parse_args(raw)
+    cfg = load_config()
 
-    if args.subcommand == "insights":
-        _cmd_insights(args)
+    if args.subcommand == "help":
+        _cmd_help(parser, args)
+    elif args.subcommand == "insights":
+        _cmd_insights(args, cfg)
+    elif args.subcommand == "providers":
+        _cmd_providers(args)
+    elif args.subcommand == "models":
+        _cmd_models(args)
     else:
-        _cmd_run(args)
+        _cmd_run(args, cfg)

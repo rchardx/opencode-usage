@@ -290,3 +290,35 @@ class TestSelectModelInteractive:
         ):
             result = select_model_interactive(console)
         assert result == top[1]
+
+    def test_preferred_models_from_config_first(self):
+        from io import StringIO
+
+        from rich.console import Console
+
+        console = Console(file=StringIO())
+        models = _SAMPLE_MODELS.copy()
+        cfg = type("Cfg", (), {"preferred_models": ["opencode/kimi-k2.5"]})()
+
+        with (
+            patch("opencode_usage.models.list_models", return_value=models),
+            patch("opencode_usage.models.Prompt.ask", return_value="1"),
+        ):
+            result = select_model_interactive(console, cfg)
+        assert result == "opencode/kimi-k2.5"
+
+    def test_invalid_preferred_falls_back_to_defaults(self):
+        from io import StringIO
+
+        from rich.console import Console
+
+        console = Console(file=StringIO())
+        models = _SAMPLE_MODELS.copy()
+        cfg = type("Cfg", (), {"preferred_models": ["bogus/model"]})()
+
+        with (
+            patch("opencode_usage.models.list_models", return_value=models),
+            patch("opencode_usage.models.Prompt.ask", return_value="1"),
+        ):
+            result = select_model_interactive(console, cfg)
+        assert result == rank_models(models)[0]

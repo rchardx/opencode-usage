@@ -326,3 +326,36 @@ class TestFetchRows:
         db = OpenCodeDB(db_path=_make_cli_db(tmp_path))
         rows = _fetch_rows(db, "unknown")
         assert rows == []
+
+
+# ── help, providers and models subcommands ───────────────────
+
+
+class TestHelpSubcommand:
+    def test_help_subcommand_parses(self):
+        args = _build_parser().parse_args(["help"])
+        assert args.subcommand == "help"
+        assert args.command is None
+
+    def test_help_with_command(self):
+        args = _build_parser().parse_args(["help", "run"])
+        assert args.subcommand == "help"
+        assert args.command == "run"
+
+    def test_help_invalid_command(self):
+        with pytest.raises(SystemExit):
+            _build_parser().parse_args(["help", "bogus"])
+
+
+class TestProvidersModelsSubcommands:
+    def test_providers_json(self):
+        args = _build_parser().parse_args(["providers", "--json"])
+        assert args.subcommand == "providers"
+        assert args.json_output is True
+
+    def test_models_flags(self):
+        args = _build_parser().parse_args(["models", "--provider", "opencode-go", "--id", "--json"])
+        assert args.subcommand == "models"
+        assert args.provider == ["opencode-go"]
+        assert args.id is True
+        assert args.json_output is True
