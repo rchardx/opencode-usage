@@ -326,3 +326,26 @@ class TestFetchRows:
         db = OpenCodeDB(db_path=_make_cli_db(tmp_path))
         rows = _fetch_rows(db, "unknown")
         assert rows == []
+
+
+# ── --db and --no-llm flags ──────────────────────────────────
+
+
+class TestDbFlag:
+    def test_run_db_flag(self):
+        args = _build_parser().parse_args(["run", "--db", "/tmp/x.db"])
+        assert args.db == "/tmp/x.db"
+
+    def test_insights_db_flag(self):
+        args = _build_parser().parse_args(["insights", "--db", "/tmp/x.db"])
+        assert args.db == "/tmp/x.db"
+
+
+class TestNoLlmFlag:
+    def test_no_llm_default_false(self):
+        args = _build_parser().parse_args(["insights"])
+        assert args.no_llm is False
+
+    def test_no_llm_set(self):
+        args = _build_parser().parse_args(["insights", "--no-llm"])
+        assert args.no_llm is True

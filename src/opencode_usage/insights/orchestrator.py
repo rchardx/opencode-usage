@@ -73,42 +73,46 @@ def run_insights(args: argparse.Namespace) -> None:
     at_a_glance: dict[str, object] = {}
     llm_available = True
 
-    try:
-        with Progress(
-            SpinnerColumn(),
-            TextColumn("[progress.description]{task.description}"),
-            console=console,
-        ) as progress:
-            task = progress.add_task(
-                f"Analyzing sessions (0/{len(session_ids)})...", total=len(session_ids)
-            )
-
-            def on_progress(current: int, total: int) -> None:
-                progress.update(
-                    task,
-                    completed=current,
-                    description=f"Analyzing sessions ({current}/{total})...",
+    if getattr(args, "no_llm", False):
+        llm_available = False
+        console.print("[yellow]Data-only mode (--no-llm): skipping LLM analysis[/yellow]")
+    else:
+        try:
+            with Progress(
+                SpinnerColumn(),
+                TextColumn("[progress.description]{task.description}"),
+                console=console,
+            ) as progress:
+                task = progress.add_task(
+                    f"Analyzing sessions (0/{len(session_ids)})...", total=len(session_ids)
                 )
 
-            facets = extract_facets(
-                db_path, session_ids, config, cache=cache, on_progress=on_progress
-            )
-            progress.update(task, description="Running aggregate analysis...")
-            aggregate_results = run_aggregate_analysis(facets, stats, config)
-            progress.update(task, description="Generating summary...")
-            at_a_glance = generate_at_a_glance(aggregate_results, stats, config)
+                def on_progress(current: int, total: int) -> None:
+                    progress.update(
+                        task,
+                        completed=current,
+                        description=f"Analyzing sessions ({current}/{total})...",
+                    )
 
-    except FileNotFoundError:
-        llm_available = False
-        console.print(
-            "[yellow]Warning:[/yellow] opencode not found — generating data-only report "
-            "(install opencode for full analysis)"
-        )
-    except Exception as e:
-        llm_available = False
-        warnings.warn(f"LLM analysis failed: {e}", stacklevel=2)
-        console.print(f"[yellow]Warning:[/yellow] LLM analysis failed: {e}")
-        console.print("Generating data-only report.")
+                facets = extract_facets(
+                    db_path, session_ids, config, cache=cache, on_progress=on_progress
+                )
+                progress.update(task, description="Running aggregate analysis...")
+                aggregate_results = run_aggregate_analysis(facets, stats, config)
+                progress.update(task, description="Generating summary...")
+                at_a_glance = generate_at_a_glance(aggregate_results, stats, config)
+
+        except FileNotFoundError:
+            llm_available = False
+            console.print(
+                "[yellow]Warning:[/yellow] opencode not found — generating data-only report "
+                "(install opencode for full analysis)"
+            )
+        except Exception as e:
+            llm_available = False
+            warnings.warn(f"LLM analysis failed: {e}", stacklevel=2)
+            console.print(f"[yellow]Warning:[/yellow] LLM analysis failed: {e}")
+            console.print("Generating data-only report.")
 
     # Phase 3: Generate report
     insights_data = {

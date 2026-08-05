@@ -413,3 +413,27 @@ class TestRunInsights:
 
         assert output_path.exists()
         assert output_path.read_text() == "<html>custom</html>"
+
+    @patch("opencode_usage.insights.orchestrator.generate_report")
+    @patch("opencode_usage.insights.orchestrator.aggregate_all")
+    @patch("opencode_usage.insights.orchestrator.filter_sessions")
+    def test_no_llm_skips_llm_analysis(
+        self,
+        mock_filter,
+        mock_aggregate,
+        mock_generate_report,
+        tmp_path,
+    ):
+        """--no-llm skips the LLM phases and still generates a data-only report."""
+        output_path = tmp_path / "test.html"
+        mock_filter.return_value = ["s1"]
+        mock_aggregate.return_value = _mock_stats()
+        mock_generate_report.return_value = "<html>data-only</html>"
+
+        with patch("opencode_usage.insights.orchestrator.extract_facets") as mock_ef:
+            args = _make_args(output=str(output_path), no_llm=True)
+            run_insights(args)
+
+            mock_ef.assert_not_called()
+            assert output_path.exists()
+            assert "data-only" in output_path.read_text()
