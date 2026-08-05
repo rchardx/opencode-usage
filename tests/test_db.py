@@ -204,6 +204,43 @@ class TestDaily:
         assert len(rows) == 1
 
 
+# ── by_time ──────────────────────────────────────────────────
+
+
+class TestByTime:
+    def test_hour_buckets(self, db_path):
+        db = OpenCodeDB(db_path=db_path)
+        rows = db.by_time("hour")
+        assert rows
+        for r in rows:
+            assert ":" in r.label  # YYYY-MM-DD HH:00
+
+    def test_week_buckets(self, db_path):
+        db = OpenCodeDB(db_path=db_path)
+        rows = db.by_time("week")
+        assert rows
+        for r in rows:
+            assert "-W" in r.label  # YYYY-WNN
+
+    def test_month_buckets(self, db_path):
+        db = OpenCodeDB(db_path=db_path)
+        rows = db.by_time("month")
+        assert rows
+        for r in rows:
+            assert len(r.label) == 7  # YYYY-MM
+
+    def test_unknown_granularity_falls_back_to_day(self, db_path):
+        db = OpenCodeDB(db_path=db_path)
+        rows = db.by_time("decade")
+        assert rows
+        for r in rows:
+            assert "-" in r.label
+
+    def test_daily_is_day_granularity(self, db_path):
+        db = OpenCodeDB(db_path=db_path)
+        assert db.daily() == db.by_time("day")
+
+
 # ── by_model ─────────────────────────────────────────────────
 
 

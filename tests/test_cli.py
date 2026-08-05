@@ -326,3 +326,49 @@ class TestFetchRows:
         db = OpenCodeDB(db_path=_make_cli_db(tmp_path))
         rows = _fetch_rows(db, "unknown")
         assert rows == []
+
+
+# ── --weeks / --months and extended --by ─────────────────────
+
+
+class TestWeeksMonthsFlags:
+    def test_weeks_flag(self):
+        args = _build_parser().parse_args(["run", "--weeks", "2"])
+        assert args.weeks == 2
+
+    def test_months_flag(self):
+        args = _build_parser().parse_args(["run", "--months", "6"])
+        assert args.months == 6
+
+    def test_insights_months_flag(self):
+        args = _build_parser().parse_args(["insights", "--months", "3"])
+        assert args.months == 3
+
+
+class TestTimeGroupings:
+    def test_by_choices_time(self):
+        parser = _build_parser()
+        for choice in ("minute", "hour", "week", "month"):
+            args = parser.parse_args(["run", "--by", choice])
+            assert args.by == choice
+
+
+class TestResolveSinceWeeksMonths:
+    def test_weeks_flag(self):
+        ns = argparse.Namespace(since=None, days=None, weeks=2, months=None)
+        since, period = _resolve_since(ns)
+        expected = datetime.now().astimezone() - timedelta(days=14)
+        assert abs((since - expected).total_seconds()) < 2
+        assert period == "Last 2 weeks"
+
+    def test_months_flag(self):
+        ns = argparse.Namespace(since=None, days=None, weeks=None, months=6)
+        since, period = _resolve_since(ns)
+        expected = datetime.now().astimezone() - timedelta(days=180)
+        assert abs((since - expected).total_seconds()) < 2
+        assert period == "Last 6 months"
+
+    def test_days_wins_over_months(self):
+        ns = argparse.Namespace(since=None, days=7, weeks=None, months=12)
+        _since, period = _resolve_since(ns)
+        assert period == "Last 7 days"

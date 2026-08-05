@@ -5,7 +5,7 @@ CLI tool to track and display [OpenCode](https://github.com/opencodeco/opencode)
 ## Features
 
 - **Daily breakdown** — token usage and cost per day
-- **Group by dimension** — model, agent, provider, or session
+- **Group by dimension** — minute/hour/day/week/month time buckets, or model, agent, provider, session
 - **Agent × Model view** — see which model each agent uses
 - **Time filtering** — last N days, relative durations (`7d`, `2w`), or ISO dates
 - **Period comparison** — compare current vs previous period with `--compare`
@@ -46,10 +46,13 @@ opencode-usage
 
 # Time filtering
 opencode-usage run --days 30
+opencode-usage run --weeks 2
+opencode-usage run --months 6
 opencode-usage run --since 7d
 opencode-usage run --since 2025-01-01
 
-# Group by dimension
+# Group by dimension (time buckets or entities)
+opencode-usage run --by hour           # minute, hour, day, week, month
 opencode-usage run --by model
 opencode-usage run --by agent          # shows model per agent
 opencode-usage run --by provider

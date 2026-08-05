@@ -11,7 +11,7 @@ from typing import Any
 
 from . import __version__, render
 from .db import OpenCodeDB, UsageRow
-from .render import render_daily, render_grouped, render_summary
+from .render import render_grouped, render_summary, render_time
 
 
 def _parse_since(value: str) -> datetime:
@@ -41,20 +41,34 @@ def _parse_since(value: str) -> datetime:
 
 
 def _add_time_args(parser: argparse.ArgumentParser) -> None:
-    """Add --days and --since to *parser* (shared by run & insights)."""
+    """Add time-window flags to *parser* (shared by run & insights)."""
     parser.add_argument(
         "--days",
         type=int,
         default=None,
         metavar="N",
-        help="Show last N days (default: 7)",
+        help="Show the last N days (default: 7)",
+    )
+    parser.add_argument(
+        "--weeks",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Show the last N weeks",
+    )
+    parser.add_argument(
+        "--months",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Show the last N months (30 days each)",
     )
     parser.add_argument(
         "--since",
         type=_parse_since,
         default=None,
         metavar="SPEC",
-        help="Time filter: '7d', '2w', '30d', '3h', or ISO date",
+        help="Time filter: '7d', '2w', '30d', '3h', '12m', or ISO date",
     )
 
 
@@ -72,9 +86,12 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_time_args(run_p)
     run_p.add_argument(
         "--by",
-        choices=["model", "agent", "provider", "session", "day"],
+        choices=["minute", "hour", "day", "week", "month", "model", "agent", "provider", "session"],
         default=None,
-        help="Group results by dimension",
+        help=(
+            "Group by minute, hour, day, week, month, model, agent, provider, "
+            "or session"
+        ),
     )
     run_p.add_argument(
         "--limit",
@@ -126,6 +143,9 @@ def _build_parser() -> argparse.ArgumentParser:
     return p
 
 
+_TIME_GROUPINGS = ("minute", "hour", "day", "week", "month")
+
+
 def _resolve_since(args: argparse.Namespace) -> tuple[datetime | None, str]:
     """Resolve the effective 'since' datetime and a human-readable period label."""
     now = datetime.now().astimezone()
@@ -133,9 +153,19 @@ def _resolve_since(args: argparse.Namespace) -> tuple[datetime | None, str]:
     if args.since is not None:
         return args.since, f"Since {args.since.strftime('%Y-%m-%d')}"
 
-    if args.days is not None:
-        since = now - timedelta(days=args.days)
-        return since, f"Last {args.days} days"
+    for value, label in (
+        (args.days, "days"),
+        (getattr(args, "weeks", None), "weeks"),
+        (getattr(args, "months", None), "months"),
+    ):
+        if value is not None and value > 0:
+            if label == "weeks":
+                delta = timedelta(days=value * 7)
+            elif label == "months":
+                delta = timedelta(days=value * 30)
+            else:
+                delta = timedelta(days=value)
+            return now - delta, f"Last {value} {label}"
 
     since = now - timedelta(days=7)
     return since, "Last 7 days"
@@ -150,8 +180,8 @@ def _fetch_rows(
     limit: int | None = None,
 ) -> list[UsageRow]:
     """Fetch rows based on group_by dimension."""
-    if group_by == "day":
-        return db.daily(since=since, until=until, limit=limit)
+    if group_by in _TIME_GROUPINGS:
+        return db.by_time(group_by, since=since, until=until, limit=limit)
     if group_by == "model":
         return db.by_model(since=since, until=until, limit=limit)
     if group_by == "agent":
@@ -229,8 +259,8 @@ def _cmd_run(args: argparse.Namespace) -> None:
 
     deltas = _compute_deltas(rows, prev_rows) if prev_rows else None
 
-    if group_by == "day":
-        render_daily(rows, period)
+    if group_by in _TIME_GROUPINGS:
+        render_time(rows, period, granularity=group_by)
     else:
         render_grouped(rows, group_by, period, deltas=deltas)
 
