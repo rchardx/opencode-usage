@@ -38,6 +38,28 @@ class UsageRow:
     detail: str | None = None
 
 
+_TIME_FORMATS = {
+    "minute": "%Y-%m-%d %H:%M",
+    "hour": "%Y-%m-%d %H:00",
+    "day": "%Y-%m-%d",
+    "week": "%Y-W%W",
+    "month": "%Y-%m",
+}
+
+
+@dataclass
+class Filters:
+    """Row filters applied to every query (all fields are optional).
+
+    The row-filters feature uses this; it is inert until then.
+    """
+
+    providers: list[str] | None = None
+    models: list[str] | None = None
+    agents: list[str] | None = None
+    exclude_providers: list[str] | None = None
+
+
 @dataclass
 class SessionMeta:
     """Metadata about a user session."""
@@ -151,21 +173,42 @@ class OpenCodeDB:
 
     # ── public API ────────────────────────────────────────────────
 
+    def by_time(
+        self,
+        granularity: str = "day",
+        since: datetime | None = None,
+        until: datetime | None = None,
+        limit: int | None = None,
+        filters: Filters | None = None,
+    ) -> list[UsageRow]:
+        """Group by a time bucket: minute, hour, day, week, or month.
+
+        ``filters`` is forwarded to the query layer once row filters land
+        (tracked in the filters-and-output PR); it is inert here.
+        """
+        fmt = _TIME_FORMATS.get(granularity, _TIME_FORMATS["day"])
+        kwargs: dict[str, object] = {}
+        if filters is not None:
+            kwargs["filters"] = filters
+        return self._base_query(
+            group_expr=(
+                f"strftime('{fmt}', json_extract(data, '$.time.created') / 1000, "
+                "'unixepoch', 'localtime')"
+            ),
+            since=since,
+            until=until,
+            order="label DESC",
+            limit=limit,
+            **kwargs,
+        )
+
     def daily(
         self,
         since: datetime | None = None,
         until: datetime | None = None,
         limit: int | None = None,
     ) -> list[UsageRow]:
-        return self._base_query(
-            group_expr=(
-                "date(json_extract(data, '$.time.created') / 1000, 'unixepoch', 'localtime')"
-            ),
-            since=since,
-            until=until,
-            order="label DESC",
-            limit=limit,
-        )
+        return self.by_time("day", since=since, until=until, limit=limit)
 
     def by_model(
         self,

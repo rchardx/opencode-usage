@@ -195,17 +195,32 @@ def render_summary(
     console.print(Panel(text, title=f"[bold]OpenCode Usage — {period}[/bold]", border_style="blue"))
 
 
-def render_daily(rows: list[UsageRow], period: str) -> None:
-    """Render the daily breakdown table."""
+_TIME_LABELS = {
+    "minute": "Minute",
+    "hour": "Hour",
+    "day": "Date",
+    "week": "Week",
+    "month": "Month",
+}
+
+
+def render_time(rows: list[UsageRow], period: str, granularity: str = "day") -> None:
+    """Render the time-bucketed breakdown table."""
+    label = _TIME_LABELS.get(granularity, "Bucket")
     trend = [r.tokens.total for r in rows]
     table = _make_table(
-        title=f"Daily Usage ({period})",
-        label_header="Date",
+        title=f"{label} Usage ({period})",
+        label_header=label,
         rows=rows,
         show_breakdown=True,
         trend_values=trend,
     )
     console.print(table)
+
+
+def render_daily(rows: list[UsageRow], period: str) -> None:
+    """Render the daily breakdown table (legacy alias of render_time)."""
+    render_time(rows, period, granularity="day")
 
 
 def render_grouped(
