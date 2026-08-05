@@ -56,8 +56,12 @@ def rank_models(models: list[str]) -> list[str]:
     return sorted(models, key=lambda m: (*_tier(m), m.lower()))
 
 
-def select_model_interactive(console: Console) -> str:
-    """Interactive model picker — exits with code 1 if opencode is unavailable."""
+def select_model_interactive(console: Console, cfg: object | None = None) -> str:
+    """Interactive model picker — exits with code 1 if opencode is unavailable.
+
+    When *cfg* carries a ``preferred_models`` list (config file), those
+    models are shown first, before the built-in recommended list.
+    """
     all_models = list_models()
     if not all_models:
         console.print(
@@ -65,8 +69,18 @@ def select_model_interactive(console: Console) -> str:
         )
         sys.exit(1)
 
+    preferred: list[str] = list(_PREFERRED)
+    if cfg is not None:
+        configured = getattr(cfg, "preferred_models", None)
+        if configured:
+            valid = {m.lower() for m in all_models}
+            preferred = [m for m in configured if m.lower() in valid]
+            if not preferred:
+                preferred = list(_PREFERRED)
+
     ranked = rank_models(all_models)
-    top = ranked[:_TOP_N]
+    top = [m for m in ranked if m in preferred] + [m for m in ranked if m not in preferred]
+    top = top[:_TOP_N]
 
     console.print()
     console.print("[cyan]Select a model for insights analysis:[/cyan]")

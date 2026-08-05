@@ -36,7 +36,7 @@ After installation, `opencode-usage` is available globally.
 
 ## Usage
 
-The CLI has two subcommands: `run` (default) and `insights`.
+The CLI has these subcommands: `run` (default), `insights`, `providers`, `models`, and `help`.
 
 ### `run` — Token usage statistics
 
@@ -61,6 +61,27 @@ opencode-usage run --by model --json | jq '.rows[].label'
 
 # Compare with previous period
 opencode-usage run --since 7d --compare
+```
+
+### `providers` / `models` — list available IDs
+
+Both list what opencode itself exposes (`opencode models`), so they stay in
+sync with your setup. Providers marked with `*` have credentials in
+opencode's `auth.json`.
+
+```bash
+opencode-usage providers
+opencode-usage models
+opencode-usage models --provider opencode-go --id
+opencode-usage providers --json
+```
+
+### `help` — command help
+
+```bash
+opencode-usage help            # general help, config docs, examples
+opencode-usage help run
+opencode-usage help insights
 ```
 
 ### `insights` — LLM-powered analysis
@@ -107,6 +128,23 @@ Requires an API key for the LLM provider — set via environment variable (e.g. 
 ```
 
 ## Configuration
+
+### Config file
+
+Optional `~/.config/opencode-usage/config.toml` sets defaults. CLI flags
+always win over config values, which win over built-in defaults.
+
+```toml
+[defaults]
+days = 7          # or weeks / months
+by = "day"        # minute, hour, day, week, month, model, agent, provider, session
+sort = "tokens"   # tokens, cost, calls
+
+[insights]
+preferred_models = ["opencode-go/kimi-k3"]  # shown first in the model picker
+```
+
+### Environment variables
 
 | Environment Variable | Description |
 |---|---|
