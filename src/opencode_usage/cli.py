@@ -71,6 +71,12 @@ def _build_parser() -> argparse.ArgumentParser:
     run_p = sub.add_parser("run", help="Token usage statistics (default)")
     _add_time_args(run_p)
     run_p.add_argument(
+        "--db",
+        default=None,
+        metavar="PATH",
+        help="Path to opencode.db (default: OPENCODE_DB env or 'opencode db path')",
+    )
+    run_p.add_argument(
         "--by",
         choices=["model", "agent", "provider", "session", "day"],
         default=None,
@@ -99,9 +105,21 @@ def _build_parser() -> argparse.ArgumentParser:
     ins_p = sub.add_parser("insights", help="LLM-powered usage analysis report")
     _add_time_args(ins_p)
     ins_p.add_argument(
+        "--db",
+        default=None,
+        metavar="PATH",
+        help="Path to opencode.db (default: OPENCODE_DB env or 'opencode db path')",
+    )
+    ins_p.add_argument(
         "--model",
         default=None,
         help="Model ID for insights analysis (interactive picker if omitted)",
+    )
+    ins_p.add_argument(
+        "--no-llm",
+        action="store_true",
+        dest="no_llm",
+        help="Skip LLM analysis; generate a data-only report",
     )
     ins_p.add_argument(
         "--force",
@@ -187,7 +205,7 @@ def _compute_deltas(
 def _cmd_run(args: argparse.Namespace) -> None:
     """Execute the ``run`` subcommand."""
     try:
-        db = OpenCodeDB()
+        db = OpenCodeDB(args.db)
     except FileNotFoundError as e:
         render.console.print(f"[red]Error:[/red] {e}")
         sys.exit(1)
