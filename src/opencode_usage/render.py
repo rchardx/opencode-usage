@@ -174,6 +174,7 @@ def render_summary(
     total: UsageRow,
     period: str,
     prev_total: UsageRow | None = None,
+    run_rate: float | None = None,
 ) -> None:
     """Print a one-line summary panel."""
     text = Text()
@@ -192,7 +193,48 @@ def render_summary(
     if prev_total is not None and prev_total.cost > 0:
         pct = (total.cost - prev_total.cost) / prev_total.cost * 100
         text.append(Text.from_markup(f" {_fmt_delta(pct)}"))
+    if run_rate is not None:
+        text.append("  │  ≈ ", style="dim")
+        text.append(_fmt_cost(run_rate), style="cyan")
+        text.append("/mo", style="dim")
     console.print(Panel(text, title=f"[bold]OpenCode Usage — {period}[/bold]", border_style="blue"))
+
+
+def render_csv(rows: list[UsageRow], include_detail: bool = False) -> None:
+    """Print rows as CSV to stdout."""
+    import csv
+    import sys
+
+    writer = csv.writer(sys.stdout)
+    header = [
+        "label",
+        "calls",
+        "input",
+        "output",
+        "reasoning",
+        "cache_read",
+        "cache_write",
+        "total",
+        "cost",
+    ]
+    if include_detail:
+        header.insert(1, "model")
+    writer.writerow(header)
+    for r in rows:
+        row = [
+            r.label,
+            r.calls,
+            r.tokens.input,
+            r.tokens.output,
+            r.tokens.reasoning,
+            r.tokens.cache_read,
+            r.tokens.cache_write,
+            r.tokens.total,
+            round(r.cost, 6),
+        ]
+        if include_detail:
+            row.insert(1, r.detail or "")
+        writer.writerow(row)
 
 
 def render_daily(rows: list[UsageRow], period: str) -> None:

@@ -10,8 +10,8 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from . import __version__, render
-from .db import OpenCodeDB, UsageRow
-from .render import render_daily, render_grouped, render_summary
+from .db import Filters, OpenCodeDB, UsageRow
+from .render import render_csv, render_daily, render_grouped, render_summary
 
 
 def _parse_since(value: str) -> datetime:
@@ -37,6 +37,38 @@ def _parse_since(value: str) -> datetime:
 
     raise argparse.ArgumentTypeError(
         f"Invalid time spec: '{value}'. Use '7d', '2w', '30d', '3h', or ISO date."
+    )
+
+
+def _add_filter_args(parser: argparse.ArgumentParser) -> None:
+    """Add row filters to *parser* (repeatable)."""
+    parser.add_argument(
+        "--provider",
+        action="append",
+        default=None,
+        metavar="ID",
+        help="Only include this provider (repeatable)",
+    )
+    parser.add_argument(
+        "--model",
+        action="append",
+        default=None,
+        metavar="ID",
+        help="Only include this model (repeatable)",
+    )
+    parser.add_argument(
+        "--agent",
+        action="append",
+        default=None,
+        metavar="NAME",
+        help="Only include this agent (repeatable)",
+    )
+    parser.add_argument(
+        "--exclude-provider",
+        action="append",
+        default=None,
+        metavar="ID",
+        help="Exclude this provider (repeatable)",
     )
 
 
@@ -76,6 +108,14 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Group results by dimension",
     )
+    _add_filter_args(run_p)
+    run_p.add_argument(
+        "--sort",
+        choices=["tokens", "cost", "calls"],
+        default=None,
+        metavar="KEY",
+        help="Sort grouped rows by tokens (default), cost, or calls",
+    )
     run_p.add_argument(
         "--limit",
         type=int,
@@ -83,11 +123,18 @@ def _build_parser() -> argparse.ArgumentParser:
         metavar="N",
         help="Max rows to display",
     )
-    run_p.add_argument(
+    out = run_p.add_mutually_exclusive_group()
+    out.add_argument(
         "--json",
         action="store_true",
         dest="json_output",
-        help="Output as JSON",
+        help="Output as JSON (includes run_rate_monthly)",
+    )
+    out.add_argument(
+        "--csv",
+        action="store_true",
+        dest="csv_output",
+        help="Output as CSV",
     )
     run_p.add_argument(
         "--compare",
@@ -148,18 +195,22 @@ def _fetch_rows(
     since: datetime | None = None,
     until: datetime | None = None,
     limit: int | None = None,
+    filters: Filters | None = None,
+    sort_by: str | None = None,
 ) -> list[UsageRow]:
     """Fetch rows based on group_by dimension."""
     if group_by == "day":
-        return db.daily(since=since, until=until, limit=limit)
+        return db.daily(since=since, until=until, limit=limit, filters=filters)
     if group_by == "model":
-        return db.by_model(since=since, until=until, limit=limit)
+        return db.by_model(since=since, until=until, limit=limit, filters=filters, sort_by=sort_by)
     if group_by == "agent":
-        return db.by_agent(since=since, until=until, limit=limit)
+        return db.by_agent(since=since, until=until, limit=limit, filters=filters)
     if group_by == "provider":
-        return db.by_provider(since=since, until=until, limit=limit)
+        return db.by_provider(
+            since=since, until=until, limit=limit, filters=filters, sort_by=sort_by
+        )
     if group_by == "session":
-        return db.by_session(since=since, until=until, limit=limit)
+        return db.by_session(since=since, until=until, limit=limit, filters=filters)
     return []
 
 
@@ -184,6 +235,25 @@ def _compute_deltas(
     return deltas
 
 
+def _build_filters(args: argparse.Namespace) -> Filters:
+    return Filters(
+        providers=args.provider,
+        models=args.model,
+        agents=args.agent,
+        exclude_providers=args.exclude_provider,
+    )
+
+
+def _compute_run_rate(total: UsageRow, since: datetime | None) -> float | None:
+    """Project the current cost onto a 30-day month at the observed pace."""
+    if total.cost <= 0 or since is None:
+        return None
+    elapsed_days = (datetime.now().astimezone() - since).total_seconds() / 86400
+    if elapsed_days < 0.1:
+        return None
+    return total.cost / elapsed_days * 30.44
+
+
 def _cmd_run(args: argparse.Namespace) -> None:
     """Execute the ``run`` subcommand."""
     try:
@@ -194,6 +264,7 @@ def _cmd_run(args: argparse.Namespace) -> None:
 
     since, period = _resolve_since(args)
     group_by = args.by or "day"
+    sort_by = args.sort
 
     now = datetime.now().astimezone()
     prev_since = None
@@ -201,22 +272,38 @@ def _cmd_run(args: argparse.Namespace) -> None:
         period_length = now - since
         prev_since = since - period_length
 
-    rows = _fetch_rows(db, group_by, since=since, limit=args.limit)
-    total = db.totals(since=since)
+    filters = _build_filters(args)
+    rows = _fetch_rows(
+        db, group_by, since=since, limit=args.limit, filters=filters, sort_by=sort_by
+    )
+    total = db.totals(since=since, filters=filters)
 
     prev_total = None
     prev_rows: list[UsageRow] = []
     if prev_since is not None:
-        prev_total = db.totals(since=prev_since, until=since)
+        prev_total = db.totals(since=prev_since, until=since, filters=filters)
         if group_by != "day":
-            prev_rows = _fetch_rows(db, group_by, since=prev_since, until=since, limit=args.limit)
+            prev_rows = _fetch_rows(
+                db,
+                group_by,
+                since=prev_since,
+                until=since,
+                limit=args.limit,
+                filters=filters,
+                sort_by=sort_by,
+            )
+
+    run_rate = _compute_run_rate(total, since)
 
     if args.json_output:
         output: dict[str, Any] = {
             "period": period,
+            "group_by": group_by,
             "total": db.to_dicts([total])[0],
             "rows": db.to_dicts(rows),
         }
+        if run_rate is not None:
+            output["run_rate_monthly"] = round(run_rate, 4)
         if prev_total is not None:
             output["previous_total"] = db.to_dicts([prev_total])[0]
         if prev_rows:
@@ -224,7 +311,11 @@ def _cmd_run(args: argparse.Namespace) -> None:
         print(json.dumps(output, indent=2, ensure_ascii=False))
         return
 
-    render_summary(total, period, prev_total=prev_total)
+    if args.csv_output:
+        render_csv(rows, include_detail=(group_by == "agent"))
+        return
+
+    render_summary(total, period, prev_total=prev_total, run_rate=run_rate)
     render.console.print()
 
     deltas = _compute_deltas(rows, prev_rows) if prev_rows else None

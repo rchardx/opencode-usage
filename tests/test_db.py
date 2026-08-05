@@ -11,7 +11,7 @@ from unittest.mock import patch
 
 import pytest
 
-from opencode_usage.db import OpenCodeDB, UsageRow, _default_db_path
+from opencode_usage.db import Filters, OpenCodeDB, UsageRow, _default_db_path
 
 
 def _make_msg(
@@ -177,6 +177,55 @@ class TestOpenCodeDBInit:
     def test_valid_path(self, db_path):
         db = OpenCodeDB(db_path=db_path)
         assert db.path == db_path
+
+
+# ── filters ─────────────────────────────────────────────────
+
+
+class TestFilters:
+    def test_provider_filter(self, db_path):
+        db = OpenCodeDB(db_path=db_path)
+        rows = db.by_model(filters=Filters(providers=["openrouter"]))
+        assert [r.label for r in rows] == ["deepseek-r1"]
+        assert sum(r.tokens.total for r in rows) == 11699  # m1 + m2 + m5 + m6
+
+    def test_provider_filter_matches_exact_ids(self, db_path):
+        db = OpenCodeDB(db_path=db_path)
+        rows = db.by_model(filters=Filters(providers=["nonexistent"]))
+        assert rows == []
+
+    def test_exclude_provider(self, db_path):
+        db = OpenCodeDB(db_path=db_path)
+        rows = db.by_model(filters=Filters(exclude_providers=["openrouter"]))
+        labels = {r.label for r in rows}
+        assert "deepseek-r1" not in labels
+        assert rows
+
+    def test_agent_filter(self, db_path):
+        db = OpenCodeDB(db_path=db_path)
+        rows = db.by_model(filters=Filters(agents=["build"]))
+        assert [r.label for r in rows] == ["deepseek-r1"]
+
+    def test_model_filter(self, db_path):
+        db = OpenCodeDB(db_path=db_path)
+        rows = db.by_provider(filters=Filters(models=["gemma-3"]))
+        assert [r.label for r in rows] == ["google"]
+
+    def test_filters_apply_to_totals(self, db_path):
+        db = OpenCodeDB(db_path=db_path)
+        total = db.totals(filters=Filters(providers=["nonexistent"]))
+        assert total.calls == 0
+
+    def test_sort_by_cost(self, db_path):
+        db = OpenCodeDB(db_path=db_path)
+        rows = db.by_model(sort_by="cost")
+        costs = [r.cost for r in rows]
+        assert costs == sorted(costs, reverse=True)
+
+    def test_filters_apply_to_session(self, db_path):
+        db = OpenCodeDB(db_path=db_path)
+        rows = db.by_session(filters=Filters(providers=["nonexistent"]))
+        assert rows == []
 
 
 # ── daily ────────────────────────────────────────────────────

@@ -9,7 +9,9 @@ CLI tool to track and display [OpenCode](https://github.com/opencodeco/opencode)
 - **Agent × Model view** — see which model each agent uses
 - **Time filtering** — last N days, relative durations (`7d`, `2w`), or ISO dates
 - **Period comparison** — compare current vs previous period with `--compare`
-- **JSON output** — pipe to `jq` or other tools
+- **Filters** — narrow by provider, model, or agent (`--provider`, `--model`, `--agent`, `--exclude-provider`)
+- **JSON / CSV output** — pipe to `jq`, Excel, or other tools
+- **Run-rate projection** — estimated monthly cost at the observed pace
 - **LLM-powered insights** — analyze session transcripts and generate a self-contained HTML report
 - **Cross-platform** — macOS, Linux, Windows
 
@@ -55,9 +57,18 @@ opencode-usage run --by agent          # shows model per agent
 opencode-usage run --by provider
 opencode-usage run --by session --limit 10
 
-# JSON output
+# Filters (repeatable)
+opencode-usage run --provider openrouter --by model
+opencode-usage run --model deepseek-r1 --agent build
+opencode-usage run --exclude-provider kimi-for-coding --by provider
+
+# Sorting
+opencode-usage run --by model --sort cost
+
+# JSON / CSV output
 opencode-usage run --json
 opencode-usage run --by model --json | jq '.rows[].label'
+opencode-usage run --by provider --csv
 
 # Compare with previous period
 opencode-usage run --since 7d --compare
