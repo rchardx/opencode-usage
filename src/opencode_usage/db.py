@@ -39,6 +39,23 @@ class UsageRow:
 
 
 @dataclass
+class Filters:
+    """Row filters applied to every query (all fields are optional)."""
+
+    providers: list[str] | None = None
+    models: list[str] | None = None
+    agents: list[str] | None = None
+    exclude_providers: list[str] | None = None
+
+
+_SORT_EXPRESSIONS = {
+    "tokens": "total_tokens DESC",
+    "cost": "cost DESC",
+    "calls": "calls DESC",
+}
+
+
+@dataclass
 class SessionMeta:
     """Metadata about a user session."""
 
@@ -94,6 +111,32 @@ class OpenCodeDB:
             params.append(ts_ms)
         return " ".join(clauses), params
 
+    def _filter_clause(
+        self,
+        filters: Filters | None,
+        *,
+        col: str = "data",
+    ) -> tuple[str, list[Any]]:
+        """Return WHERE clause fragments and params for row filters."""
+        if filters is None:
+            return "", []
+        clauses: list[str] = []
+        params: list[Any] = []
+        for key, values in (
+            ("providerID", filters.providers),
+            ("modelID", filters.models),
+            ("agent", filters.agents),
+        ):
+            if values:
+                placeholders = ", ".join("?" * len(values))
+                clauses.append(f"json_extract({col}, '$.{key}') IN ({placeholders})")
+                params.extend(values)
+        if filters.exclude_providers:
+            placeholders = ", ".join("?" * len(filters.exclude_providers))
+            clauses.append(f"json_extract({col}, '$.providerID') NOT IN ({placeholders})")
+            params.extend(filters.exclude_providers)
+        return (" AND " + " AND ".join(clauses)) if clauses else "", params
+
     def _base_query(
         self,
         group_expr: str,
@@ -101,8 +144,15 @@ class OpenCodeDB:
         until: datetime | None = None,
         order: str = "total_tokens DESC",
         limit: int | None = None,
+        filters: Filters | None = None,
+        sort_by: str | None = None,
     ) -> list[UsageRow]:
         time_clause, params = self._time_filter(since, until)
+        filter_clause, filter_params = self._filter_clause(filters)
+        params.extend(filter_params)
+
+        if sort_by in _SORT_EXPRESSIONS:
+            order = _SORT_EXPRESSIONS[sort_by]
 
         sql = f"""
             SELECT
@@ -119,6 +169,7 @@ class OpenCodeDB:
             WHERE json_extract(data, '$.role') = 'assistant'
               AND json_extract(data, '$.tokens.total') IS NOT NULL
               {time_clause}
+              {filter_clause}
             GROUP BY label
             ORDER BY {order}
         """
@@ -156,6 +207,7 @@ class OpenCodeDB:
         since: datetime | None = None,
         until: datetime | None = None,
         limit: int | None = None,
+        filters: Filters | None = None,
     ) -> list[UsageRow]:
         return self._base_query(
             group_expr=(
@@ -165,6 +217,7 @@ class OpenCodeDB:
             until=until,
             order="label DESC",
             limit=limit,
+            filters=filters,
         )
 
     def by_model(
@@ -172,12 +225,16 @@ class OpenCodeDB:
         since: datetime | None = None,
         until: datetime | None = None,
         limit: int | None = None,
+        filters: Filters | None = None,
+        sort_by: str | None = None,
     ) -> list[UsageRow]:
         return self._base_query(
             group_expr="json_extract(data, '$.modelID')",
             since=since,
             until=until,
             limit=limit,
+            filters=filters,
+            sort_by=sort_by,
         )
 
     def by_agent(
@@ -185,9 +242,12 @@ class OpenCodeDB:
         since: datetime | None = None,
         until: datetime | None = None,
         limit: int | None = None,
+        filters: Filters | None = None,
     ) -> list[UsageRow]:
         """Group by agent x model, showing which model each agent uses."""
         time_clause, params = self._time_filter(since, until)
+        filter_clause, filter_params = self._filter_clause(filters)
+        params.extend(filter_params)
 
         sql = f"""
             SELECT
@@ -205,6 +265,7 @@ class OpenCodeDB:
             WHERE json_extract(data, '$.role') = 'assistant'
               AND json_extract(data, '$.tokens.total') IS NOT NULL
               {time_clause}
+              {filter_clause}
             GROUP BY agent, model
             ORDER BY agent, total_tokens DESC
         """
@@ -241,12 +302,16 @@ class OpenCodeDB:
         since: datetime | None = None,
         until: datetime | None = None,
         limit: int | None = None,
+        filters: Filters | None = None,
+        sort_by: str | None = None,
     ) -> list[UsageRow]:
         return self._base_query(
             group_expr="json_extract(data, '$.providerID')",
             since=since,
             until=until,
             limit=limit,
+            filters=filters,
+            sort_by=sort_by,
         )
 
     def by_session(
@@ -254,9 +319,12 @@ class OpenCodeDB:
         since: datetime | None = None,
         until: datetime | None = None,
         limit: int | None = None,
+        filters: Filters | None = None,
     ) -> list[UsageRow]:
         """Group by session, using session title as label."""
         time_clause, params = self._time_filter(since, until, col="m.data")
+        filter_clause, filter_params = self._filter_clause(filters, col="m.data")
+        params.extend(filter_params)
 
         sql = f"""
             SELECT
@@ -274,6 +342,7 @@ class OpenCodeDB:
             WHERE json_extract(m.data, '$.role') = 'assistant'
               AND json_extract(m.data, '$.tokens.total') IS NOT NULL
               {time_clause}
+              {filter_clause}
             GROUP BY m.session_id
             ORDER BY total_tokens DESC
         """
@@ -308,12 +377,14 @@ class OpenCodeDB:
         self,
         since: datetime | None = None,
         until: datetime | None = None,
+        filters: Filters | None = None,
     ) -> UsageRow:
         """Return a single aggregated row for the period."""
         rows = self._base_query(
             group_expr="'total'",
             since=since,
             until=until,
+            filters=filters,
         )
         if rows:
             return rows[0]

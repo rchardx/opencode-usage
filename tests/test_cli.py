@@ -326,3 +326,61 @@ class TestFetchRows:
         db = OpenCodeDB(db_path=_make_cli_db(tmp_path))
         rows = _fetch_rows(db, "unknown")
         assert rows == []
+
+
+# ── filters, --sort and --csv flags ──────────────────────────
+
+
+class TestFilterFlags:
+    def test_provider_flag(self):
+        args = _build_parser().parse_args(["run", "--provider", "openrouter"])
+        assert args.provider == ["openrouter"]
+
+    def test_repeatable_provider(self):
+        args = _build_parser().parse_args(["run", "--provider", "a", "--provider", "b"])
+        assert args.provider == ["a", "b"]
+
+    def test_model_and_agent_flags(self):
+        args = _build_parser().parse_args(["run", "--model", "k3", "--agent", "build"])
+        assert args.model == ["k3"]
+        assert args.agent == ["build"]
+
+    def test_exclude_provider(self):
+        args = _build_parser().parse_args(["run", "--exclude-provider", "kimi-for-coding"])
+        assert args.exclude_provider == ["kimi-for-coding"]
+
+
+class TestSortFlag:
+    def test_sort_cost(self):
+        args = _build_parser().parse_args(["run", "--by", "model", "--sort", "cost"])
+        assert args.sort == "cost"
+
+    def test_sort_invalid(self):
+        with pytest.raises(SystemExit):
+            _build_parser().parse_args(["run", "--sort", "bogus"])
+
+
+class TestCsvFlag:
+    def test_csv_flag(self):
+        args = _build_parser().parse_args(["run", "--csv"])
+        assert args.csv_output is True
+
+    def test_json_and_csv_exclusive(self):
+        with pytest.raises(SystemExit):
+            _build_parser().parse_args(["run", "--json", "--csv"])
+
+
+class TestRunRate:
+    def test_computes_monthly_projection(self):
+        from opencode_usage.cli import _compute_run_rate
+
+        row = UsageRow(label="total", cost=10.0)
+        since = datetime.now().astimezone() - timedelta(days=30)
+        rate = _compute_run_rate(row, since)
+        assert rate == pytest.approx(10.0, rel=0.1)
+
+    def test_zero_cost_returns_none(self):
+        from opencode_usage.cli import _compute_run_rate
+
+        row = UsageRow(label="total", cost=0.0)
+        assert _compute_run_rate(row, datetime.now().astimezone()) is None
