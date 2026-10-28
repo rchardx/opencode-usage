@@ -106,6 +106,18 @@ Requires an API key for the LLM provider — set via environment variable (e.g. 
 └────────────────────────┴──────────────┴───────┴─────────┴─────────┘
 ```
 
+## Schema Support
+
+opencode-usage supports both OpenCode v1 and v2 database schemas, as well as migrated (mixed) databases:
+
+| OpenCode Version | Session Table | Message Table | Status |
+|---|---|---|---|
+| **v1** (legacy) | `session` | `message` (`role = 'assistant'`) | Supported |
+| **v2** (current) | `session_v2` | `session_message` (`type = 'assistant'`) | Supported |
+| **Mixed / Migrated** | Both tables present | Both tables present | Supported (deduplicated by ID) |
+
+In mixed databases migrated from v1 to v2, messages present in both tables are automatically deduplicated by message ID to prevent double-counting.
+
 ## Configuration
 
 | Environment Variable | Description |

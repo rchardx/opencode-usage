@@ -72,6 +72,108 @@ class OpenCodeDB:
         conn.row_factory = sqlite3.Row
         return conn
 
+    def _detect_tables(self, conn) -> set[str]:
+        """Return the set of user table names in the database."""
+        rows = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        ).fetchall()
+        return {r["name"] for r in rows}
+
+    def _source_query(self, conn) -> str:
+        """Return the SQL SELECT for normalized assistant messages across v1, v2, or mixed schemas."""
+        tables = self._detect_tables(conn)
+        has_v1 = "message" in tables
+        has_v2 = "session_message" in tables
+
+        parts: list[str] = []
+
+        if has_v2:
+            parts.append("""
+                SELECT
+                    id,
+                    session_id,
+                    CASE WHEN time_created > 1000000000000 THEN time_created ELSE time_created * 1000 END AS time_created_ms,
+                    json_extract(data, '$.agent') AS agent,
+                    json_extract(data, '$.model.id') AS model,
+                    json_extract(data, '$.model.providerID') AS provider,
+                    COALESCE(json_extract(data, '$.tokens.input'), 0) AS input_tokens,
+                    COALESCE(json_extract(data, '$.tokens.output'), 0) AS output_tokens,
+                    COALESCE(json_extract(data, '$.tokens.reasoning'), 0) AS reasoning_tokens,
+                    COALESCE(json_extract(data, '$.tokens.cache.read'), 0) AS cache_read,
+                    COALESCE(json_extract(data, '$.tokens.cache.write'), 0) AS cache_write,
+                    (COALESCE(json_extract(data, '$.tokens.input'), 0) +
+                     COALESCE(json_extract(data, '$.tokens.output'), 0) +
+                     COALESCE(json_extract(data, '$.tokens.reasoning'), 0)) AS total_tokens,
+                    COALESCE(json_extract(data, '$.cost'), 0) AS cost
+                FROM session_message
+                WHERE type = 'assistant'
+                  AND (COALESCE(json_extract(data, '$.tokens.input'), 0) +
+                       COALESCE(json_extract(data, '$.tokens.output'), 0) +
+                       COALESCE(json_extract(data, '$.tokens.reasoning'), 0)) > 0
+            """)
+
+        if has_v1:
+            dedup_clause = "AND id NOT IN (SELECT id FROM session_message)" if has_v2 else ""
+            parts.append(f"""
+                SELECT
+                    id,
+                    session_id,
+                    json_extract(data, '$.time.created') AS time_created_ms,
+                    json_extract(data, '$.agent') AS agent,
+                    json_extract(data, '$.modelID') AS model,
+                    json_extract(data, '$.providerID') AS provider,
+                    COALESCE(json_extract(data, '$.tokens.input'), 0) AS input_tokens,
+                    COALESCE(json_extract(data, '$.tokens.output'), 0) AS output_tokens,
+                    COALESCE(json_extract(data, '$.tokens.reasoning'), 0) AS reasoning_tokens,
+                    COALESCE(json_extract(data, '$.tokens.cache.read'), 0) AS cache_read,
+                    COALESCE(json_extract(data, '$.tokens.cache.write'), 0) AS cache_write,
+                    COALESCE(json_extract(data, '$.tokens.total'), 0) AS total_tokens,
+                    COALESCE(json_extract(data, '$.cost'), 0) AS cost
+                FROM message
+                WHERE json_extract(data, '$.role') = 'assistant'
+                  AND json_extract(data, '$.tokens.total') IS NOT NULL
+                  {dedup_clause}
+            """)
+
+        if not parts:
+            return """
+                SELECT
+                    NULL AS id,
+                    NULL AS session_id,
+                    0 AS time_created_ms,
+                    NULL AS agent,
+                    NULL AS model,
+                    NULL AS provider,
+                    0 AS input_tokens,
+                    0 AS output_tokens,
+                    0 AS reasoning_tokens,
+                    0 AS cache_read,
+                    0 AS cache_write,
+                    0 AS total_tokens,
+                    0.0 AS cost
+                WHERE 1 = 0
+            """
+
+        return " UNION ALL ".join(parts)
+
+    def _sessions_query(self, conn) -> str:
+        """Return the SQL SELECT for normalized session (id, title)."""
+        tables = self._detect_tables(conn)
+        has_v1 = "session" in tables
+        has_v2 = "session_v2" in tables
+
+        if has_v2 and has_v1:
+            return """
+                SELECT id, title FROM session_v2
+                UNION
+                SELECT id, title FROM session WHERE id NOT IN (SELECT id FROM session_v2)
+            """
+        if has_v2:
+            return "SELECT id, title FROM session_v2"
+        if has_v1:
+            return "SELECT id, title FROM session"
+        return "SELECT NULL AS id, NULL AS title WHERE 1 = 0"
+
     # ── query helpers ─────────────────────────────────────────────
 
     def _time_filter(
@@ -79,18 +181,18 @@ class OpenCodeDB:
         since: datetime | None,
         until: datetime | None = None,
         *,
-        col: str = "data",
+        col: str = "src.time_created_ms",
     ) -> tuple[str, list[Any]]:
         """Return WHERE clause fragments and params for time filtering."""
         clauses: list[str] = []
         params: list[Any] = []
         if since is not None:
             ts_ms = int(since.timestamp() * 1000)
-            clauses.append(f"AND json_extract({col}, '$.time.created') >= ?")
+            clauses.append(f"AND {col} >= ?")
             params.append(ts_ms)
         if until is not None:
             ts_ms = int(until.timestamp() * 1000)
-            clauses.append(f"AND json_extract({col}, '$.time.created') < ?")
+            clauses.append(f"AND {col} < ?")
             params.append(ts_ms)
         return " ".join(clauses), params
 
@@ -102,32 +204,32 @@ class OpenCodeDB:
         order: str = "total_tokens DESC",
         limit: int | None = None,
     ) -> list[UsageRow]:
-        time_clause, params = self._time_filter(since, until)
-
-        sql = f"""
-            SELECT
-                {group_expr} AS label,
-                COUNT(*)                                           AS calls,
-                COALESCE(SUM(json_extract(data, '$.tokens.input')),     0) AS input_tokens,
-                COALESCE(SUM(json_extract(data, '$.tokens.output')),    0) AS output_tokens,
-                COALESCE(SUM(json_extract(data, '$.tokens.reasoning')), 0) AS reasoning_tokens,
-                COALESCE(SUM(json_extract(data, '$.tokens.cache.read')),  0) AS cache_read,
-                COALESCE(SUM(json_extract(data, '$.tokens.cache.write')), 0) AS cache_write,
-                COALESCE(SUM(json_extract(data, '$.tokens.total')),    0) AS total_tokens,
-                COALESCE(SUM(json_extract(data, '$.cost')),            0) AS cost
-            FROM message
-            WHERE json_extract(data, '$.role') = 'assistant'
-              AND json_extract(data, '$.tokens.total') IS NOT NULL
-              {time_clause}
-            GROUP BY label
-            ORDER BY {order}
-        """
-        if limit:
-            sql += " LIMIT ?"
-            params.append(limit)
-
         conn = self._connect()
         try:
+            source_sql = self._source_query(conn)
+            time_clause, params = self._time_filter(since, until, col="src.time_created_ms")
+
+            sql = f"""
+                SELECT
+                    {group_expr} AS label,
+                    COUNT(*)                                AS calls,
+                    COALESCE(SUM(src.input_tokens),     0) AS input_tokens,
+                    COALESCE(SUM(src.output_tokens),    0) AS output_tokens,
+                    COALESCE(SUM(src.reasoning_tokens), 0) AS reasoning_tokens,
+                    COALESCE(SUM(src.cache_read),       0) AS cache_read,
+                    COALESCE(SUM(src.cache_write),      0) AS cache_write,
+                    COALESCE(SUM(src.total_tokens),     0) AS total_tokens,
+                    COALESCE(SUM(src.cost),             0) AS cost
+                FROM ({source_sql}) src
+                WHERE 1 = 1
+                  {time_clause}
+                GROUP BY label
+                ORDER BY {order}
+            """
+            if limit:
+                sql += " LIMIT ?"
+                params.append(limit)
+
             rows = conn.execute(sql, params).fetchall()
         finally:
             conn.close()
@@ -159,7 +261,7 @@ class OpenCodeDB:
     ) -> list[UsageRow]:
         return self._base_query(
             group_expr=(
-                "date(json_extract(data, '$.time.created') / 1000, 'unixepoch', 'localtime')"
+                "date(src.time_created_ms / 1000, 'unixepoch', 'localtime')"
             ),
             since=since,
             until=until,
@@ -174,7 +276,7 @@ class OpenCodeDB:
         limit: int | None = None,
     ) -> list[UsageRow]:
         return self._base_query(
-            group_expr="json_extract(data, '$.modelID')",
+            group_expr="src.model",
             since=since,
             until=until,
             limit=limit,
@@ -187,33 +289,33 @@ class OpenCodeDB:
         limit: int | None = None,
     ) -> list[UsageRow]:
         """Group by agent x model, showing which model each agent uses."""
-        time_clause, params = self._time_filter(since, until)
-
-        sql = f"""
-            SELECT
-                json_extract(data, '$.agent')   AS agent,
-                json_extract(data, '$.modelID') AS model,
-                COUNT(*)                                           AS calls,
-                COALESCE(SUM(json_extract(data, '$.tokens.input')),     0) AS input_tokens,
-                COALESCE(SUM(json_extract(data, '$.tokens.output')),    0) AS output_tokens,
-                COALESCE(SUM(json_extract(data, '$.tokens.reasoning')), 0) AS reasoning_tokens,
-                COALESCE(SUM(json_extract(data, '$.tokens.cache.read')),  0) AS cache_read,
-                COALESCE(SUM(json_extract(data, '$.tokens.cache.write')), 0) AS cache_write,
-                COALESCE(SUM(json_extract(data, '$.tokens.total')),    0) AS total_tokens,
-                COALESCE(SUM(json_extract(data, '$.cost')),            0) AS cost
-            FROM message
-            WHERE json_extract(data, '$.role') = 'assistant'
-              AND json_extract(data, '$.tokens.total') IS NOT NULL
-              {time_clause}
-            GROUP BY agent, model
-            ORDER BY agent, total_tokens DESC
-        """
-        if limit:
-            sql += " LIMIT ?"
-            params.append(limit)
-
         conn = self._connect()
         try:
+            source_sql = self._source_query(conn)
+            time_clause, params = self._time_filter(since, until, col="src.time_created_ms")
+
+            sql = f"""
+                SELECT
+                    src.agent                               AS agent,
+                    src.model                               AS model,
+                    COUNT(*)                                AS calls,
+                    COALESCE(SUM(src.input_tokens),     0) AS input_tokens,
+                    COALESCE(SUM(src.output_tokens),    0) AS output_tokens,
+                    COALESCE(SUM(src.reasoning_tokens), 0) AS reasoning_tokens,
+                    COALESCE(SUM(src.cache_read),       0) AS cache_read,
+                    COALESCE(SUM(src.cache_write),      0) AS cache_write,
+                    COALESCE(SUM(src.total_tokens),     0) AS total_tokens,
+                    COALESCE(SUM(src.cost),             0) AS cost
+                FROM ({source_sql}) src
+                WHERE 1 = 1
+                  {time_clause}
+                GROUP BY src.agent, src.model
+                ORDER BY agent, total_tokens DESC
+            """
+            if limit:
+                sql += " LIMIT ?"
+                params.append(limit)
+
             rows = conn.execute(sql, params).fetchall()
         finally:
             conn.close()
@@ -243,7 +345,7 @@ class OpenCodeDB:
         limit: int | None = None,
     ) -> list[UsageRow]:
         return self._base_query(
-            group_expr="json_extract(data, '$.providerID')",
+            group_expr="src.provider",
             since=since,
             until=until,
             limit=limit,
@@ -256,33 +358,34 @@ class OpenCodeDB:
         limit: int | None = None,
     ) -> list[UsageRow]:
         """Group by session, using session title as label."""
-        time_clause, params = self._time_filter(since, until, col="m.data")
-
-        sql = f"""
-            SELECT
-                COALESCE(s.title, m.session_id) AS label,
-                COUNT(*)                                           AS calls,
-                COALESCE(SUM(json_extract(m.data, '$.tokens.input')),     0) AS input_tokens,
-                COALESCE(SUM(json_extract(m.data, '$.tokens.output')),    0) AS output_tokens,
-                COALESCE(SUM(json_extract(m.data, '$.tokens.reasoning')), 0) AS reasoning_tokens,
-                COALESCE(SUM(json_extract(m.data, '$.tokens.cache.read')),  0) AS cache_read,
-                COALESCE(SUM(json_extract(m.data, '$.tokens.cache.write')), 0) AS cache_write,
-                COALESCE(SUM(json_extract(m.data, '$.tokens.total')),    0) AS total_tokens,
-                COALESCE(SUM(json_extract(m.data, '$.cost')),            0) AS cost
-            FROM message m
-            LEFT JOIN session s ON m.session_id = s.id
-            WHERE json_extract(m.data, '$.role') = 'assistant'
-              AND json_extract(m.data, '$.tokens.total') IS NOT NULL
-              {time_clause}
-            GROUP BY m.session_id
-            ORDER BY total_tokens DESC
-        """
-        if limit:
-            sql += " LIMIT ?"
-            params.append(limit)
-
         conn = self._connect()
         try:
+            source_sql = self._source_query(conn)
+            sessions_sql = self._sessions_query(conn)
+            time_clause, params = self._time_filter(since, until, col="src.time_created_ms")
+
+            sql = f"""
+                SELECT
+                    COALESCE(s.title, src.session_id)       AS label,
+                    COUNT(*)                                AS calls,
+                    COALESCE(SUM(src.input_tokens),     0) AS input_tokens,
+                    COALESCE(SUM(src.output_tokens),    0) AS output_tokens,
+                    COALESCE(SUM(src.reasoning_tokens), 0) AS reasoning_tokens,
+                    COALESCE(SUM(src.cache_read),       0) AS cache_read,
+                    COALESCE(SUM(src.cache_write),      0) AS cache_write,
+                    COALESCE(SUM(src.total_tokens),     0) AS total_tokens,
+                    COALESCE(SUM(src.cost),             0) AS cost
+                FROM ({source_sql}) src
+                LEFT JOIN ({sessions_sql}) s ON src.session_id = s.id
+                WHERE 1 = 1
+                  {time_clause}
+                GROUP BY src.session_id
+                ORDER BY total_tokens DESC
+            """
+            if limit:
+                sql += " LIMIT ?"
+                params.append(limit)
+
             rows = conn.execute(sql, params).fetchall()
         finally:
             conn.close()

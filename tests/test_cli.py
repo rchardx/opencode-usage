@@ -291,6 +291,36 @@ def _make_cli_db(tmp_path: Path) -> Path:
     return db_path
 
 
+def _make_cli_v2_db(tmp_path: Path) -> Path:
+    """Create a minimal v2 database for CLI testing."""
+    db_path = tmp_path / "opencode_v2_cli.db"
+    conn = sqlite3.connect(str(db_path))
+    conn.execute(
+        "CREATE TABLE session_v2 (id TEXT PRIMARY KEY, title TEXT, time_created INTEGER)"
+    )
+    conn.execute(
+        "CREATE TABLE session_message (id TEXT PRIMARY KEY, session_id TEXT, type TEXT, seq INTEGER, time_created INTEGER, data TEXT)"
+    )
+    now_ms = int(datetime.now().astimezone().timestamp() * 1000)
+    data = json.dumps(
+        {
+            "agent": "build",
+            "model": {"id": "v2-model", "providerID": "openrouter"},
+            "cost": 0.01,
+            "tokens": {"input": 100, "output": 50, "reasoning": 0, "cache": {"read": 10, "write": 5}},
+            "time": {"created": now_ms},
+        }
+    )
+    conn.execute(
+        "INSERT INTO session_message VALUES (?, ?, ?, ?, ?, ?)",
+        ("m1", "s1", "assistant", 1, now_ms, data),
+    )
+    conn.execute("INSERT INTO session_v2 VALUES (?, ?, ?)", ("s1", "Test V2 Session", now_ms))
+    conn.commit()
+    conn.close()
+    return db_path
+
+
 class TestFetchRows:
     def test_day(self, tmp_path):
         db = OpenCodeDB(db_path=_make_cli_db(tmp_path))
@@ -326,3 +356,26 @@ class TestFetchRows:
         db = OpenCodeDB(db_path=_make_cli_db(tmp_path))
         rows = _fetch_rows(db, "unknown")
         assert rows == []
+
+    def test_v2_fetch_all_groups(self, tmp_path):
+        db = OpenCodeDB(db_path=_make_cli_v2_db(tmp_path))
+        day_rows = _fetch_rows(db, "day")
+        assert len(day_rows) == 1
+        assert day_rows[0].calls == 1
+
+        model_rows = _fetch_rows(db, "model")
+        assert len(model_rows) == 1
+        assert model_rows[0].label == "v2-model"
+
+        agent_rows = _fetch_rows(db, "agent")
+        assert len(agent_rows) == 1
+        assert agent_rows[0].label == "build"
+        assert agent_rows[0].detail == "v2-model"
+
+        provider_rows = _fetch_rows(db, "provider")
+        assert len(provider_rows) == 1
+        assert provider_rows[0].label == "openrouter"
+
+        session_rows = _fetch_rows(db, "session")
+        assert len(session_rows) == 1
+        assert session_rows[0].label == "Test V2 Session"
